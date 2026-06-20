@@ -1,0 +1,66 @@
+server:
+  port: 8081
+
+geoserver:
+  base-url: ${GEOSERVER_BASE_URL:http://localhost:8080/geoserver}
+  username: ${GEOSERVER_USERNAME:}
+  password: ${GEOSERVER_PASSWORD:}
+  init:
+    run-on-startup: ${GEOSERVER_INIT_RUN_ON_STARTUP:false}
+
+  workspaces:
+    - name: ${GEOSERVER_WORKSPACE:geo_init_demo}
+
+  styles:
+    - workspace: ${GEOSERVER_WORKSPACE:geo_init_demo}
+      name: grid_polygon
+      sld-location: classpath:styles/default-polygon.sld
+
+  datastores:
+    - workspace: ${GEOSERVER_WORKSPACE:geo_init_demo}
+      name: gauss_store
+      description: GaussDB PostGIS-compatible datastore
+      host: ${GAUSS_DB_HOST:localhost}
+      port: ${GAUSS_DB_PORT:5432}
+      database: ${GAUSS_DB_NAME:gisdb}
+      schema: ${GAUSS_DB_SCHEMA:public}
+      username: ${GAUSS_DB_USERNAME:}
+      password: ${GAUSS_DB_PASSWORD:}
+      dbtype: postgis
+
+  layers:
+    - workspace: ${GEOSERVER_WORKSPACE:geo_init_demo}
+      datastore: gauss_store
+      name: grid_finance
+      title: Grid Finance
+      source-type: SQL_VIEW
+      sql-location: classpath:sql/grid_finance.sql
+      srs: EPSG:4326
+      geometry:
+        name: geom_polygon
+        type: Polygon
+        srid: 4326
+      default-style: grid_polygon
+      sql-parameters:
+        - name: city
+          default-value: "-1"
+          regexp-validator: "^[-|\\w]*$"
+        - name: county
+          default-value: "-1"
+          regexp-validator: "^[-|\\w]*$"
+        - name: type
+          default-value: all
+          regexp-validator: "^[\\w|]*$"
+      wmts:
+        enabled: true
+        gridsets:
+          - EPSG:4326
+          - EPSG:900913
+        formats:
+          - image/png
+          - image/jpeg
+        parameter-filters:
+          - type: regex
+            key: VIEWPARAMS
+            default-value: "city:-1;county:-1;type:all"
+            regex: "^city:[0-9-]+;county:[0-9-]+;type:[\\w|]+$"

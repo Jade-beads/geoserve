@@ -1,0 +1,442 @@
+package com.geoserve.init.service;
+
+import com.geoserve.init.config.GeoServerInitProperties;
+import com.geoserve.init.config.GeoServerInitProperties.Datastore;
+import com.geoserve.init.config.GeoServerInitProperties.Geometry;
+import com.geoserve.init.config.GeoServerInitProperties.Layer;
+import com.geoserve.init.config.GeoServerInitProperties.ParameterFilter;
+import com.geoserve.init.config.GeoServerInitProperties.SqlParameter;
+import com.geoserve.init.config.GeoServerInitProperties.Style;
+import com.geoserve.init.config.GeoServerInitProperties.Wmts;
+import com.geoserve.init.config.GeoServerInitProperties.Workspace;
+import com.geoserve.init.model.GeoServerStatus;
+import com.geoserve.init.model.ResourceAction;
+import com.geoserve.init.model.SourceType;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.ResourceLoader;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StreamUtils;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestTemplate;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+@Component
+public class GeoServerRestClient {
+
+    private final RestTemplate restTemplate;
+    private final GeoServerInitProperties properties;
+    private final ResourceLoader resourceLoader;
+
+    public GeoServerRestClient(RestTemplate restTemplate,
+                               GeoServerInitProperties properties,
+                               ResourceLoader resourceLoader) {
+        this.restTemplate = restTemplate;
+        this.properties = properties;
+        this.resourceLoader = resourceLoader;
+    }
+
+    public GeoServerStatus checkStatus() {
+        try {
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    url("/rest/about/version"),
+                    HttpMethod.GET,
+                    new HttpEntity<Void>(jsonHeaders()),
+                    Map.class);
+            return new GeoServerStatus(true, findVersion(response.getBody()), "GeoServer is reachable");
+        } catch (RestClientException ex) {
+            return new GeoServerStatus(false, null, ex.getMessage());
+        }
+    }
+
+    public ResourceAction ensureWorkspace(Workspace workspace) {
+        String name = required(workspace.getName(), "workspace.name");
+        if (exists("/rest/workspaces/" + name + ".json")) {
+            return ResourceAction.skipped("workspace", name, "Workspace already exists");
+        }
+
+        Map<String, Object> workspaceBody = object("workspace", object("name", name));
+        restTemplate.exchange(url("/rest/workspaces"), HttpMethod.POST,
+                new HttpEntity<Map<String, Object>>(workspaceBody, jsonHeaders()), Void.class);
+        return ResourceAction.created("workspace", name, "Workspace created");
+    }
+
+    public ResourceAction ensureStyle(Style style) {
+        String workspace = required(style.getWorkspace(), "style.workspace");
+        String name = required(style.getName(), "style.name");
+        String qualifiedName = workspace + ":" + name;
+        if (exists("/rest/workspaces/" + workspace + "/styles/" + name + ".json")) {
+            return ResourceAction.skipped("style", qualifiedName, "Style already exists");
+        }
+
+        String sld = readResource(required(style.getSldLocation(), "style.sldLocation"));
+        HttpHeaders headers = authHeaders();
+        headers.setContentType(MediaType.parseMediaType("application/vnd.ogc.sld+xml"));
+        restTemplate.exchange(url("/rest/workspaces/" + workspace + "/styles?name=" + name),
+                HttpMethod.POST, new HttpEntity<String>(sld, headers), Void.class);
+        return ResourceAction.created("style", qualifiedName, "Style created");
+    }
+
+    public ResourceAction ensureDatastore(Datastore datastore) {
+        String workspace = required(datastore.getWorkspace(), "datastore.workspace");
+        String name = required(datastore.getName(), "datastore.name");
+        String qualifiedName = workspace + ":" + name;
+        if (exists("/rest/workspaces/" + workspace + "/datastores/" + name + ".json")) {
+            return ResourceAction.skipped("datastore", qualifiedName, "Datastore already exists");
+        }
+
+        restTemplate.exchange(url("/rest/workspaces/" + workspace + "/datastores"),
+                HttpMethod.POST,
+                new HttpEntity<Map<String, Object>>(datastorePayload(datastore), jsonHeaders()),
+                Void.class);
+        return ResourceAction.created("datastore", qualifiedName, "Datastore created");
+    }
+
+    public ResourceAction ensureFeatureType(Layer layer) {
+        String workspace = required(layer.getWorkspace(), "layer.workspace");
+        String name = required(layer.getName(), "layer.name");
+        String qualifiedName = workspace + ":" + name;
+        if (exists("/rest/layers/" + qualifiedName + ".json")) {
+            return ResourceAction.skipped("layer", qualifiedName, "Layer already exists");
+        }
+
+        String datastore = required(layer.getDatastore(), "layer.datastore");
+        restTemplate.exchange(url("/rest/workspaces/" + workspace + "/datastores/" + datastore
+                        + "/featuretypes?recalculate=nativebbox,latlonbbox"),
+                HttpMethod.POST,
+                new HttpEntity<Map<String, Object>>(featureTypePayload(layer), jsonHeaders()),
+                Void.class);
+
+        if (hasText(layer.getDefaultStyle())) {
+            restTemplate.exchange(url("/rest/layers/" + qualifiedName),
+                    HttpMethod.PUT,
+                    new HttpEntity<Map<String, Object>>(layerStylePayload(layer), jsonHeaders()),
+                    Void.class);
+        }
+
+        return ResourceAction.created("layer", qualifiedName, "Layer created");
+    }
+
+    public ResourceAction ensureGwcLayer(Layer layer) {
+        String workspace = required(layer.getWorkspace(), "layer.workspace");
+        String name = required(layer.getName(), "layer.name");
+        String qualifiedName = workspace + ":" + name;
+        if (layer.getWmts() == null || !layer.getWmts().isEnabled()) {
+            return ResourceAction.skipped("gwc-layer", qualifiedName, "WMTS disabled");
+        }
+        if (exists("/gwc/rest/layers/" + qualifiedName + ".xml")) {
+            return ResourceAction.skipped("gwc-layer", qualifiedName, "GWC layer already exists");
+        }
+
+        HttpHeaders headers = authHeaders();
+        headers.setContentType(MediaType.APPLICATION_XML);
+        restTemplate.exchange(url("/gwc/rest/layers/" + qualifiedName + ".xml"),
+                HttpMethod.PUT,
+                new HttpEntity<String>(gwcLayerXml(layer), headers),
+                Void.class);
+        return ResourceAction.created("gwc-layer", qualifiedName, "GWC WMTS layer created");
+    }
+
+    private boolean exists(String path) {
+        try {
+            restTemplate.exchange(url(path), HttpMethod.GET, new HttpEntity<Void>(jsonHeaders()), String.class);
+            return true;
+        } catch (HttpClientErrorException ex) {
+            if (ex.getStatusCode() == HttpStatus.NOT_FOUND) {
+                return false;
+            }
+            throw ex;
+        }
+    }
+
+    private Map<String, Object> datastorePayload(Datastore datastore) {
+        Map<String, Object> dataStore = new LinkedHashMap<String, Object>();
+        dataStore.put("name", required(datastore.getName(), "datastore.name"));
+        dataStore.put("description", defaultString(datastore.getDescription(), datastore.getName()));
+        dataStore.put("type", "PostGIS");
+        dataStore.put("enabled", datastore.isEnabled());
+        dataStore.put("connectionParameters", object("entry", datastoreEntries(datastore)));
+        return object("dataStore", dataStore);
+    }
+
+    private List<Map<String, Object>> datastoreEntries(Datastore datastore) {
+        List<Map<String, Object>> entries = new ArrayList<Map<String, Object>>();
+        entries.add(entry("dbtype", defaultString(datastore.getDbtype(), "postgis")));
+        entries.add(entry("host", required(datastore.getHost(), "datastore.host")));
+        entries.add(entry("port", String.valueOf(datastore.getPort())));
+        entries.add(entry("database", required(datastore.getDatabase(), "datastore.database")));
+        entries.add(entry("schema", defaultString(datastore.getSchema(), "public")));
+        entries.add(entry("user", required(datastore.getUsername(), "datastore.username")));
+        entries.add(entry("passwd", required(datastore.getPassword(), "datastore.password")));
+        entries.add(entry("namespace", required(datastore.getWorkspace(), "datastore.workspace")));
+        entries.add(entry("Loose bbox", "true"));
+        entries.add(entry("Estimated extends", "true"));
+        entries.add(entry("validate connections", "true"));
+        entries.add(entry("fetch size", "1000"));
+        entries.add(entry("min connections", "1"));
+        entries.add(entry("max connections", "10"));
+        entries.add(entry("Connection timeout", "20"));
+        entries.add(entry("Expose primary keys", "false"));
+        return entries;
+    }
+
+    private Map<String, Object> featureTypePayload(Layer layer) {
+        Map<String, Object> featureType = new LinkedHashMap<String, Object>();
+        featureType.put("name", required(layer.getName(), "layer.name"));
+        featureType.put("nativeName", nativeName(layer));
+        featureType.put("title", defaultString(layer.getTitle(), layer.getName()));
+        featureType.put("enabled", layer.isEnabled());
+        featureType.put("srs", defaultString(layer.getSrs(), "EPSG:4326"));
+        featureType.put("projectionPolicy", "FORCE_DECLARED");
+        featureType.put("store", object("name", layer.getWorkspace() + ":" + layer.getDatastore()));
+
+        if (layer.getSourceType() == SourceType.SQL_VIEW) {
+            featureType.put("metadata", object("entry", jdbcVirtualTableEntry(layer)));
+        }
+
+        return object("featureType", featureType);
+    }
+
+    private Map<String, Object> jdbcVirtualTableEntry(Layer layer) {
+        Map<String, Object> entry = new LinkedHashMap<String, Object>();
+        entry.put("@key", "JDBC_VIRTUAL_TABLE");
+        entry.put("virtualTable", virtualTable(layer));
+        return entry;
+    }
+
+    private Map<String, Object> virtualTable(Layer layer) {
+        Geometry geometry = layer.getGeometry();
+        if (geometry == null) {
+            throw new IllegalArgumentException("layer.geometry is required for SQL_VIEW layer " + layer.getName());
+        }
+
+        Map<String, Object> virtualTable = new LinkedHashMap<String, Object>();
+        virtualTable.put("name", layer.getName());
+        virtualTable.put("sql", readResource(required(layer.getSqlLocation(), "layer.sqlLocation")));
+        virtualTable.put("escapeSql", false);
+        virtualTable.put("geometry", geometryPayload(geometry));
+        virtualTable.put("parameter", sqlParameters(layer));
+        return virtualTable;
+    }
+
+    private List<Map<String, Object>> sqlParameters(Layer layer) {
+        List<Map<String, Object>> parameters = new ArrayList<Map<String, Object>>();
+        if (layer.getSqlParameters() == null) {
+            return parameters;
+        }
+        for (SqlParameter parameter : layer.getSqlParameters()) {
+            Map<String, Object> payload = new LinkedHashMap<String, Object>();
+            payload.put("name", required(parameter.getName(), "sqlParameter.name"));
+            payload.put("defaultValue", required(parameter.getDefaultValue(), "sqlParameter.defaultValue"));
+            payload.put("regexpValidator", required(parameter.getRegexpValidator(), "sqlParameter.regexpValidator"));
+            parameters.add(payload);
+        }
+        return parameters;
+    }
+
+    private Map<String, Object> geometryPayload(Geometry geometry) {
+        Map<String, Object> payload = new LinkedHashMap<String, Object>();
+        payload.put("name", required(geometry.getName(), "geometry.name"));
+        payload.put("type", required(geometry.getType(), "geometry.type"));
+        payload.put("srid", geometry.getSrid());
+        return payload;
+    }
+
+    private Map<String, Object> layerStylePayload(Layer layer) {
+        String styleName = layer.getDefaultStyle();
+        if (!styleName.contains(":")) {
+            styleName = layer.getWorkspace() + ":" + styleName;
+        }
+        Map<String, Object> layerPayload = new LinkedHashMap<String, Object>();
+        layerPayload.put("defaultStyle", object("name", styleName));
+        layerPayload.put("enabled", layer.isEnabled());
+        return object("layer", layerPayload);
+    }
+
+    private String gwcLayerXml(Layer layer) {
+        Wmts wmts = layer.getWmts();
+        List<String> gridsets = wmts.getGridsets() == null || wmts.getGridsets().isEmpty()
+                ? defaultList("EPSG:4326") : wmts.getGridsets();
+        List<String> formats = wmts.getFormats() == null || wmts.getFormats().isEmpty()
+                ? defaultList("image/png") : wmts.getFormats();
+
+        StringBuilder xml = new StringBuilder();
+        xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+        xml.append("<GeoServerLayer>");
+        xml.append("<enabled>true</enabled>");
+        xml.append("<inMemoryCached>true</inMemoryCached>");
+        xml.append("<name>").append(xml(layer.getWorkspace() + ":" + layer.getName())).append("</name>");
+        xml.append("<mimeFormats>");
+        for (String format : formats) {
+            xml.append("<string>").append(xml(format)).append("</string>");
+        }
+        xml.append("</mimeFormats>");
+        xml.append("<gridSubsets>");
+        for (String gridset : gridsets) {
+            xml.append("<gridSubset><gridSetName>").append(xml(gridset)).append("</gridSetName></gridSubset>");
+        }
+        xml.append("</gridSubsets>");
+        xml.append("<metaWidthHeight><int>4</int><int>4</int></metaWidthHeight>");
+        xml.append("<expireCache>0</expireCache>");
+        xml.append("<expireClients>0</expireClients>");
+        xml.append("<parameterFilters>");
+        xml.append("<styleParameterFilter><key>STYLES</key><defaultValue></defaultValue></styleParameterFilter>");
+        appendParameterFilters(xml, wmts.getParameterFilters());
+        xml.append("</parameterFilters>");
+        xml.append("<gutter>0</gutter>");
+        xml.append("</GeoServerLayer>");
+        return xml.toString();
+    }
+
+    private void appendParameterFilters(StringBuilder xml, List<ParameterFilter> filters) {
+        if (filters == null) {
+            return;
+        }
+        for (ParameterFilter filter : filters) {
+            if ("string".equalsIgnoreCase(filter.getType())) {
+                xml.append("<stringParameterFilter>");
+                appendFilterCommon(xml, filter);
+                xml.append("<values>");
+                if (filter.getValues() != null) {
+                    for (String value : filter.getValues()) {
+                        xml.append("<string>").append(xml(value)).append("</string>");
+                    }
+                }
+                xml.append("</values>");
+                xml.append("</stringParameterFilter>");
+            } else {
+                xml.append("<regexParameterFilter>");
+                appendFilterCommon(xml, filter);
+                xml.append("<regex>").append(xml(required(filter.getRegex(), "wmts.parameterFilter.regex"))).append("</regex>");
+                xml.append("</regexParameterFilter>");
+            }
+        }
+    }
+
+    private void appendFilterCommon(StringBuilder xml, ParameterFilter filter) {
+        xml.append("<key>").append(xml(required(filter.getKey(), "wmts.parameterFilter.key"))).append("</key>");
+        xml.append("<defaultValue>").append(xml(required(filter.getDefaultValue(), "wmts.parameterFilter.defaultValue")))
+                .append("</defaultValue>");
+    }
+
+    private String nativeName(Layer layer) {
+        if (layer.getSourceType() == SourceType.SQL_VIEW) {
+            return layer.getName();
+        }
+        return hasText(layer.getTable()) ? layer.getTable() : layer.getName();
+    }
+
+    private String readResource(String location) {
+        Resource resource = resourceLoader.getResource(location);
+        if (!resource.exists()) {
+            throw new IllegalArgumentException("Resource not found: " + location);
+        }
+        try {
+            return StreamUtils.copyToString(resource.getInputStream(), StandardCharsets.UTF_8);
+        } catch (IOException ex) {
+            throw new IllegalStateException("Cannot read resource " + location, ex);
+        }
+    }
+
+    private String findVersion(Map body) {
+        if (body == null) {
+            return null;
+        }
+        Object about = body.get("about");
+        if (!(about instanceof Map)) {
+            return null;
+        }
+        Object resources = ((Map) about).get("resource");
+        if (resources instanceof List) {
+            for (Object item : (List) resources) {
+                if (item instanceof Map && "GeoServer".equals(((Map) item).get("@name"))) {
+                    Object version = ((Map) item).get("Version");
+                    return version == null ? null : String.valueOf(version);
+                }
+            }
+        }
+        return null;
+    }
+
+    private HttpHeaders jsonHeaders() {
+        HttpHeaders headers = authHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setAccept(defaultList(MediaType.APPLICATION_JSON));
+        return headers;
+    }
+
+    private HttpHeaders authHeaders() {
+        HttpHeaders headers = new HttpHeaders();
+        String userPass = defaultString(properties.getUsername(), "") + ":" + defaultString(properties.getPassword(), "");
+        String encoded = Base64.getEncoder().encodeToString(userPass.getBytes(StandardCharsets.UTF_8));
+        headers.set(HttpHeaders.AUTHORIZATION, "Basic " + encoded);
+        return headers;
+    }
+
+    private String url(String path) {
+        String baseUrl = required(properties.getBaseUrl(), "geoserver.baseUrl");
+        while (baseUrl.endsWith("/")) {
+            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        }
+        return baseUrl + path;
+    }
+
+    private Map<String, Object> entry(String key, String value) {
+        Map<String, Object> entry = new LinkedHashMap<String, Object>();
+        entry.put("@key", key);
+        entry.put("$", value);
+        return entry;
+    }
+
+    private Map<String, Object> object(String key, Object value) {
+        Map<String, Object> map = new LinkedHashMap<String, Object>();
+        map.put(key, value);
+        return map;
+    }
+
+    private <T> List<T> defaultList(T value) {
+        List<T> list = new ArrayList<T>();
+        list.add(value);
+        return list;
+    }
+
+    private String required(String value, String name) {
+        if (!hasText(value)) {
+            throw new IllegalArgumentException(name + " is required");
+        }
+        return value;
+    }
+
+    private boolean hasText(String value) {
+        return value != null && value.trim().length() > 0;
+    }
+
+    private String defaultString(String value, String fallback) {
+        return hasText(value) ? value : fallback;
+    }
+
+    private String xml(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&apos;");
+    }
+}
