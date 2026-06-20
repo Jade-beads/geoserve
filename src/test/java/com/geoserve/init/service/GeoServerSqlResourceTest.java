@@ -2,6 +2,8 @@ package com.geoserve.init.service;
 
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 
@@ -73,6 +75,39 @@ class GeoServerSqlResourceTest {
         assertThat(yaml).contains("average_rent|average_house_price");
     }
 
+    @Test
+    void localPostgresProfilePublishesOnlyBasicLayerWithLocalEnvironmentVariables() throws Exception {
+        String yaml = read("application-local-postgres.yml");
+
+        assertThat(yaml).contains("base-url: ${LOCAL_GEOSERVER_BASE_URL:http://localhost:8080/geoserver}");
+        assertThat(yaml).contains("username: ${LOCAL_GEOSERVER_USERNAME:}");
+        assertThat(yaml).contains("password: ${LOCAL_GEOSERVER_PASSWORD:}");
+        assertThat(yaml).contains("workspace: ${LOCAL_GEOSERVER_WORKSPACE:site_selection_local}");
+        assertThat(yaml).contains("name: local_postgres_store");
+        assertThat(yaml).contains("host: ${LOCAL_PG_HOST:localhost}");
+        assertThat(yaml).contains("database: ${LOCAL_PG_DATABASE:gisdb}");
+        assertThat(yaml).contains("sql-location: classpath:sql/basic.sql");
+        assertThat(yaml).contains("default-style: count_style");
+        assertThat(yaml).doesNotContain("basic_all");
+        assertThat(yaml).doesNotContain("scene");
+        assertThat(yaml).doesNotContain("finance_app");
+        assertThat(yaml).doesNotContain("land_val");
+    }
+
+    @Test
+    void localPostgresPartitionScriptBuildsBasicTotalPartitionFromSourceTables() throws Exception {
+        String sql = readFile("docs/sql/local-postgres-basic-partition.sql");
+
+        assertThat(sql).contains("CREATE EXTENSION IF NOT EXISTS postgis");
+        assertThat(sql).contains("tb_grid_filter_num_total");
+        assertThat(sql).contains("PARTITION BY LIST (batch_id)");
+        assertThat(sql).contains("JOIN public.tb_grid_filter_num");
+        assertThat(sql).contains("FROM public.tb_grid g");
+        assertThat(sql).contains("PARTITION OF public.tb_grid_filter_num_total");
+        assertThat(sql).contains("CREATE TABLE IF NOT EXISTS");
+        assertThat(sql).contains("population_type, age_type, gende, num");
+    }
+
     private void assertDynamicColumnSql(String resource, String tableName) throws Exception {
         String sql = read(resource);
 
@@ -92,5 +127,10 @@ class GeoServerSqlResourceTest {
         } finally {
             inputStream.close();
         }
+    }
+
+    private String readFile(String path) throws Exception {
+        byte[] bytes = Files.readAllBytes(Paths.get(path));
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 }

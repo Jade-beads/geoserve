@@ -97,6 +97,72 @@ export BASIC_ALL_BATCH_ID_DEFAULT="1001"
 mvn -Dmaven.repo.local=.m2/repository spring-boot:run
 ```
 
+## 本地 PostgreSQL 联调
+
+本地联调用 `local-postgres` profile，不影响默认业务高斯配置。该模式只发布 `basic` 一个 WMS SQL View 图层，工作区默认 `site_selection_local`，数据源默认 `local_postgres_store`。
+
+前提：
+
+- 本地 PostgreSQL 已安装 PostGIS。
+- 本地库已有 `public.tb_grid` 和 `public.tb_grid_filter_num`。
+- `tb_grid.geom_polygon` 是 GeoServer 可识别的 geometry 字段。
+
+先生成本地分区总表和一个测试批次数据：
+
+```bash
+psql "postgresql://<db-user>:<db-password>@<db-host>:5432/<database>" \
+  -v batch_id=202603310100 \
+  -v biz_date=20260331 \
+  -v city_code=100 \
+  -f docs/sql/local-postgres-basic-partition.sql
+```
+
+脚本会创建 `tb_grid_filter_num_total`，按 `batch_id` 创建 LIST 分区，并从 `tb_grid`、`tb_grid_filter_num` 写入当前批次数据。重复执行同一个 `batch_id` 时，会先清理该批次再重新插入。
+
+配置本地 GeoServer 和 PostgreSQL：
+
+```bash
+export SPRING_PROFILES_ACTIVE=local-postgres
+export LOCAL_GEOSERVER_BASE_URL="http://localhost:8080/geoserver"
+export LOCAL_GEOSERVER_USERNAME="<username>"
+export LOCAL_GEOSERVER_PASSWORD="<password>"
+export LOCAL_GEOSERVER_WORKSPACE="site_selection_local"
+export LOCAL_PG_HOST="<db-host>"
+export LOCAL_PG_PORT="5432"
+export LOCAL_PG_DATABASE="<database>"
+export LOCAL_PG_SCHEMA="public"
+export LOCAL_PG_USERNAME="<db-user>"
+export LOCAL_PG_PASSWORD="<db-password>"
+export LOCAL_BASIC_BATCH_ID_DEFAULT="202603310100"
+
+mvn -Dmaven.repo.local=.m2/repository spring-boot:run
+```
+
+启动后先检查 GeoServer 连接，再执行初始化：
+
+```bash
+curl -s http://localhost:8081/api/geoserver/status
+curl -s -X POST http://localhost:8081/api/geoserver/init
+```
+
+本地 WMS 验证示例：
+
+```text
+GET /geoserver/site_selection_local/wms?
+  service=WMS&
+  version=1.1.0&
+  request=GetMap&
+  layers=site_selection_local:basic&
+  styles=&
+  bbox=<minx>,<miny>,<maxx>,<maxy>&
+  width=768&
+  height=512&
+  srs=EPSG:4326&
+  format=image/png&
+  transparent=true&
+  viewparams=batchId:202603310100;county:-1;ptype:home%7Cwork;age:all;gender:all
+```
+
 ## 资源清单
 
 样式：

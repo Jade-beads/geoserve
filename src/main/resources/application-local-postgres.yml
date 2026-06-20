@@ -1,0 +1,53 @@
+server:
+  # 本地联调服务端口；可与默认配置保持一致。
+  port: ${LOCAL_APP_PORT:8081}
+
+geoserver:
+  # 本地 GeoServer 连接信息，与业务高斯环境完全隔离。
+  base-url: ${LOCAL_GEOSERVER_BASE_URL:http://localhost:8080/geoserver}
+  username: ${LOCAL_GEOSERVER_USERNAME:}
+  password: ${LOCAL_GEOSERVER_PASSWORD:}
+  workspace: ${LOCAL_GEOSERVER_WORKSPACE:site_selection_local}
+  init:
+    run-on-startup: ${LOCAL_GEOSERVER_INIT_RUN_ON_STARTUP:false}
+
+  styles:
+    - name: count_style
+      sld-location: classpath:styles/count-style.sld
+
+  datastore:
+    name: local_postgres_store
+    description: Local PostgreSQL PostGIS datastore
+    host: ${LOCAL_PG_HOST:localhost}
+    port: ${LOCAL_PG_PORT:5432}
+    database: ${LOCAL_PG_DATABASE:gisdb}
+    schema: ${LOCAL_PG_SCHEMA:public}
+    username: ${LOCAL_PG_USERNAME:}
+    password: ${LOCAL_PG_PASSWORD:}
+    dbtype: postgis
+
+  layers:
+    - name: basic
+      title: 基础标签
+      source-type: SQL_VIEW
+      sql-location: classpath:sql/basic.sql
+      batch-id-default: ${LOCAL_BASIC_BATCH_ID_DEFAULT:1001}
+      srs: EPSG:4326
+      geometry:
+        name: geom_polygon
+        type: Polygon
+        srid: 4326
+      default-style: count_style
+      sql-parameters:
+        - name: county
+          default-value: "-1"
+          regexp-validator: "^(-1|[0-9]+)$"
+        - name: ptype
+          default-value: all
+          regexp-validator: '^(all|home|work|home\|work|work\|home)$'
+        - name: age
+          default-value: all
+          regexp-validator: "^(all|[A-Za-z0-9_-]+(\\|[A-Za-z0-9_-]+)*)$"
+        - name: gender
+          default-value: all
+          regexp-validator: "^(all|[A-Za-z0-9_-]+(\\|[A-Za-z0-9_-]+)*)$"
