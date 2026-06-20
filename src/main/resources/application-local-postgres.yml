@@ -31,7 +31,7 @@ geoserver:
       title: 基础标签
       source-type: SQL_VIEW
       sql-location: classpath:sql/basic.sql
-      batch-id-default: ${LOCAL_BASIC_BATCH_ID_DEFAULT:1001}
+      batch-id-default: ${LOCAL_BASIC_BATCH_ID_DEFAULT:202511310100}
       srs: EPSG:4326
       geometry:
         name: geom_polygon

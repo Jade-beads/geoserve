@@ -4,27 +4,22 @@
 -- 依赖现有 public.tb_grid 与 public.tb_grid_filter_num，生成 basic.sql 使用的分区总表。
 -- 使用方式示例：
 --   psql "postgresql://<user>:<password>@<host>:5432/<database>" \
---     -v batch_id=202603310100 \
---     -v biz_date=20260331 \
---     -v city_code=100 \
 --     -f docs/sql/local-postgres-basic-partition.sql
+-- 默认变量用于当前本地批次；也可以继续通过 -v batch_id=... 覆盖。
 
 \if :{?batch_id}
 \else
-\echo 'missing required psql variable: batch_id'
-\quit 1
+\set batch_id 202511310100
 \endif
 
 \if :{?biz_date}
 \else
-\echo 'missing required psql variable: biz_date'
-\quit 1
+\set biz_date 20251131
 \endif
 
 \if :{?city_code}
 \else
-\echo 'missing required psql variable: city_code'
-\quit 1
+\set city_code 100
 \endif
 
 CREATE EXTENSION IF NOT EXISTS postgis;

@@ -87,6 +87,7 @@ class GeoServerSqlResourceTest {
         assertThat(yaml).contains("host: ${LOCAL_PG_HOST:localhost}");
         assertThat(yaml).contains("database: ${LOCAL_PG_DATABASE:gisdb}");
         assertThat(yaml).contains("sql-location: classpath:sql/basic.sql");
+        assertThat(yaml).contains("batch-id-default: ${LOCAL_BASIC_BATCH_ID_DEFAULT:202511310100}");
         assertThat(yaml).contains("default-style: count_style");
         assertThat(yaml).doesNotContain("basic_all");
         assertThat(yaml).doesNotContain("scene");
@@ -99,13 +100,31 @@ class GeoServerSqlResourceTest {
         String sql = readFile("docs/sql/local-postgres-basic-partition.sql");
 
         assertThat(sql).contains("CREATE EXTENSION IF NOT EXISTS postgis");
+        assertThat(sql).contains("\\set batch_id 202511310100");
+        assertThat(sql).contains("\\set biz_date 20251131");
+        assertThat(sql).contains("\\set city_code 100");
         assertThat(sql).contains("tb_grid_filter_num_total");
         assertThat(sql).contains("PARTITION BY LIST (batch_id)");
         assertThat(sql).contains("JOIN public.tb_grid_filter_num");
         assertThat(sql).contains("FROM public.tb_grid g");
         assertThat(sql).contains("PARTITION OF public.tb_grid_filter_num_total");
         assertThat(sql).contains("CREATE TABLE IF NOT EXISTS");
+        assertThat(sql).contains("DELETE FROM public.tb_grid_filter_num_total");
+        assertThat(sql).contains("INSERT INTO public.tb_grid_filter_num_total");
         assertThat(sql).contains("population_type, age_type, gende, num");
+    }
+
+    @Test
+    void localPostgresPrivateEnvironmentFileIsIgnoredAndExampleIsSanitized() throws Exception {
+        String gitignore = readFile(".gitignore");
+        String example = readFile(".env.local-postgres.example");
+
+        assertThat(gitignore).contains(".env.local-postgres");
+        assertThat(example).contains("LOCAL_GEOSERVER_BASE_URL=");
+        assertThat(example).contains("LOCAL_BASIC_BATCH_ID_DEFAULT=\"202511310100\"");
+        assertThat(example).doesNotContain("192.168." + "100.116");
+        assertThat(example).doesNotContain("postgres:" + "postgres");
+        assertThat(example).doesNotContain("geoserver");
     }
 
     private void assertDynamicColumnSql(String resource, String tableName) throws Exception {

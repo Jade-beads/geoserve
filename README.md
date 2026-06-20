@@ -110,33 +110,21 @@ mvn -Dmaven.repo.local=.m2/repository spring-boot:run
 先生成本地分区总表和一个测试批次数据：
 
 ```bash
-psql "postgresql://<db-user>:<db-password>@<db-host>:5432/<database>" \
-  -v batch_id=202603310100 \
-  -v biz_date=20260331 \
-  -v city_code=100 \
+PGPASSWORD=<db-password> psql -h <db-host> -p 5432 -U <db-user> -d <database> \
   -f docs/sql/local-postgres-basic-partition.sql
 ```
 
-脚本会创建 `tb_grid_filter_num_total`，按 `batch_id` 创建 LIST 分区，并从 `tb_grid`、`tb_grid_filter_num` 写入当前批次数据。重复执行同一个 `batch_id` 时，会先清理该批次再重新插入。
+脚本默认使用 `batch_id=202511310100`、`biz_date=20251131`、`city_code=100`。它会创建 `tb_grid_filter_num_total`，按 `batch_id` 创建 LIST 分区，并从 `tb_grid`、`tb_grid_filter_num` 写入当前批次数据。重复执行同一个 `batch_id` 时，会先清理该批次再重新插入。换批次时可以继续通过 `-v batch_id=... -v biz_date=... -v city_code=...` 覆盖默认值。
 
 配置本地 GeoServer 和 PostgreSQL：
 
 ```bash
-export SPRING_PROFILES_ACTIVE=local-postgres
-export LOCAL_GEOSERVER_BASE_URL="http://localhost:8080/geoserver"
-export LOCAL_GEOSERVER_USERNAME="<username>"
-export LOCAL_GEOSERVER_PASSWORD="<password>"
-export LOCAL_GEOSERVER_WORKSPACE="site_selection_local"
-export LOCAL_PG_HOST="<db-host>"
-export LOCAL_PG_PORT="5432"
-export LOCAL_PG_DATABASE="<database>"
-export LOCAL_PG_SCHEMA="public"
-export LOCAL_PG_USERNAME="<db-user>"
-export LOCAL_PG_PASSWORD="<db-password>"
-export LOCAL_BASIC_BATCH_ID_DEFAULT="202603310100"
+source .env.local-postgres
 
 mvn -Dmaven.repo.local=.m2/repository spring-boot:run
 ```
+
+`.env.local-postgres` 是本地私有文件，已加入 `.gitignore`；仓库只保留 `.env.local-postgres.example` 作为脱敏模板。
 
 启动后先检查 GeoServer 连接，再执行初始化：
 
@@ -160,7 +148,7 @@ GET /geoserver/site_selection_local/wms?
   srs=EPSG:4326&
   format=image/png&
   transparent=true&
-  viewparams=batchId:202603310100;county:-1;ptype:home%7Cwork;age:all;gender:all
+  viewparams=batchId:202511310100;county:-1;ptype:home%7Cwork;age:all;gender:all
 ```
 
 ## 资源清单
