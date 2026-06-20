@@ -1,66 +1,66 @@
-# GeoServer Init Service
+# GeoServer 初始化服务
 
-JDK 8 compatible Spring Boot service for initializing GeoServer resources through HTTP REST APIs.
+这是一个兼容 JDK 8 的 Spring Boot 服务，用于通过 HTTP REST API 初始化 GeoServer 资源。
 
-## What It Does
+## 功能说明
 
-- Creates missing workspaces.
-- Creates missing workspace styles from classpath SLD files.
-- Creates missing PostGIS-compatible datastores for GaussDB/openGauss deployments.
-- Creates missing table layers or SQL View layers.
-- Assigns a default style for newly created layers.
-- Creates missing GeoWebCache WMTS layer configuration with regex parameter filters.
-- Never deletes or overwrites existing GeoServer resources.
+- 创建缺失的工作区。
+- 从 classpath 中的 SLD 文件创建缺失的工作区样式。
+- 为 GaussDB/openGauss 部署创建 PostGIS 兼容的数据源。
+- 创建缺失的普通表图层或 SQL View 图层。
+- 为新建图层设置默认样式。
+- 创建缺失的 GeoWebCache WMTS 图层配置，并支持正则参数过滤器。
+- 不会删除或覆盖已有的 GeoServer 资源。
 
-## Endpoints
+## 接口
 
 - `GET /api/geoserver/status`
 - `POST /api/geoserver/init`
 
-`POST /api/geoserver/init` returns a per-resource action list with `CREATED`, `SKIPPED`, or `FAILED`.
+`POST /api/geoserver/init` 会返回每个资源的执行结果，状态包括 `CREATED`、`SKIPPED` 或 `FAILED`。
 
-## Run
+## 运行
 
 ```bash
 mvn -Dmaven.repo.local=.m2/repository spring-boot:run
 ```
 
-The service reads `src/main/resources/application.yml`. Most values can also be overridden with environment variables.
+服务会读取 `src/main/resources/application.yml`。大部分配置也可以通过环境变量覆盖。
 
-## Configure Real Environment Parameters
+## 配置真实环境参数
 
-The committed `application.yml` is sanitized. It keeps only safe local defaults and empty credentials. Do not commit real GeoServer URLs, database hosts, usernames, or passwords.
+仓库中提交的 `application.yml` 已经过脱敏处理，只保留安全的本地默认值和空凭据。不要把真实的 GeoServer 地址、数据库主机、用户名或密码提交到仓库。
 
-Use this flow when deploying to a real environment:
+部署到真实环境时，按下面流程配置：
 
-1. Prepare a private environment file, CI secret set, or server startup script outside the repository.
-2. Fill the required parameters listed below.
-3. Start the service with those environment variables.
-4. Check `GET /api/geoserver/status`.
-5. Run `POST /api/geoserver/init` after the status check is healthy.
+1. 在仓库外准备私有环境变量文件、CI 密钥配置或服务器启动脚本。
+2. 填写下面列出的必需参数。
+3. 使用这些环境变量启动服务。
+4. 调用 `GET /api/geoserver/status` 检查连接状态。
+5. 状态正常后，再调用 `POST /api/geoserver/init` 执行初始化。
 
-Required runtime parameters:
+必需运行参数：
 
-| Parameter | Description | Example |
+| 参数 | 说明 | 示例 |
 | --- | --- | --- |
-| `GEOSERVER_BASE_URL` | GeoServer root URL ending with `/geoserver` | `http://<host>:<port>/geoserver` |
-| `GEOSERVER_USERNAME` | GeoServer REST username | `<username>` |
-| `GEOSERVER_PASSWORD` | GeoServer REST password | `<password>` |
-| `GEOSERVER_WORKSPACE` | Workspace to create/use | `geo_init_demo` |
-| `GAUSS_DB_HOST` | GaussDB/openGauss host reachable by GeoServer | `<db-host>` |
-| `GAUSS_DB_PORT` | GaussDB/openGauss port | `5432` |
-| `GAUSS_DB_NAME` | Database name | `<database>` |
-| `GAUSS_DB_SCHEMA` | Database schema | `public` |
-| `GAUSS_DB_USERNAME` | Database username configured in GeoServer datastore | `<db-user>` |
-| `GAUSS_DB_PASSWORD` | Database password configured in GeoServer datastore | `<db-password>` |
+| `GEOSERVER_BASE_URL` | GeoServer 根地址，需要以 `/geoserver` 结尾 | `http://<host>:<port>/geoserver` |
+| `GEOSERVER_USERNAME` | GeoServer REST 用户名 | `<username>` |
+| `GEOSERVER_PASSWORD` | GeoServer REST 密码 | `<password>` |
+| `GEOSERVER_WORKSPACE` | 需要创建或使用的工作区 | `geo_init_demo` |
+| `GAUSS_DB_HOST` | GeoServer 可访问的 GaussDB/openGauss 主机 | `<db-host>` |
+| `GAUSS_DB_PORT` | GaussDB/openGauss 端口 | `5432` |
+| `GAUSS_DB_NAME` | 数据库名称 | `<database>` |
+| `GAUSS_DB_SCHEMA` | 数据库 schema | `public` |
+| `GAUSS_DB_USERNAME` | 写入 GeoServer 数据源配置的数据库用户名 | `<db-user>` |
+| `GAUSS_DB_PASSWORD` | 写入 GeoServer 数据源配置的数据库密码 | `<db-password>` |
 
-Optional parameter:
+可选参数：
 
-| Parameter | Description | Default |
+| 参数 | 说明 | 默认值 |
 | --- | --- | --- |
-| `GEOSERVER_INIT_RUN_ON_STARTUP` | Run initialization automatically on application startup | `false` |
+| `GEOSERVER_INIT_RUN_ON_STARTUP` | 是否在应用启动时自动执行初始化 | `false` |
 
-Example startup command:
+启动命令示例：
 
 ```bash
 export GEOSERVER_BASE_URL="http://<host>:<port>/geoserver"
@@ -77,8 +77,8 @@ export GAUSS_DB_PASSWORD="<db-password>"
 mvn -Dmaven.repo.local=.m2/repository spring-boot:run
 ```
 
-## Configuration Notes
+## 配置说明
 
-- `geoserver.init.run-on-startup` defaults to `false`; set it to `true` only when startup initialization is intended.
-- SQL View files use GeoServer `%param%` placeholders. Do not concatenate request input into Java SQL strings.
-- WMTS parameterized tiles use `VIEWPARAMS` by default. Keep regex filters strict to prevent unbounded cache growth.
+- `geoserver.init.run-on-startup` 默认为 `false`；只有确实需要应用启动时自动初始化时，才把它设置为 `true`。
+- SQL View 文件使用 GeoServer 的 `%param%` 占位符。不要在 Java 代码里拼接来自请求的输入作为 SQL。
+- WMTS 参数化切片默认使用 `VIEWPARAMS`。请保持正则过滤器足够严格，避免缓存数量无限增长。
