@@ -156,7 +156,7 @@ class GeoServerRestClientTest {
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(content().string(containsString("JDBC_VIRTUAL_TABLE")))
                 .andExpect(content().string(containsString("FROM tb_grid_filter_num_total")))
-                .andExpect(content().string(containsString("COALESCE(num, 0) AS total_num")))
+                .andExpect(content().string(containsString("SUM(COALESCE(num, 0)) AS total_num")))
                 .andExpect(content().string(containsString("\"geometry\":{\"name\":\"geom_polygon\",\"type\":\"Polygon\",\"srid\":4326}")))
                 .andExpect(content().string(containsString("\"name\":\"batchId\",\"defaultValue\":\"1001\",\"regexpValidator\":\"^[0-9]+$\"")))
                 .andExpect(content().string(containsString("\"name\":\"county\",\"defaultValue\":\"-1\",\"regexpValidator\":\"^(-1|[0-9]+)$\"")))

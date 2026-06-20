@@ -130,14 +130,14 @@ mvn -Dmaven.repo.local=.m2/repository spring-boot:run
 | --- | --- | --- | --- |
 | `batchId` | 全部图层 | 每个图层单独配置 | 只能是数字 |
 | `county` | WMS 图层 | `-1` | `-1` 表示全部县区；其他值映射 `code_coun` |
-| `ptype` | `basic` | `all` | 值过滤，映射 `population_type`，允许 `all/home/work/home\|work/work\|home` |
-| `age` | `basic` | `all` | 值过滤，映射 `age_type` |
-| `gender` | `basic` | `all` | 值过滤，映射 `gende` |
+| `ptype` | `basic` | `all` | 多选值过滤，映射 `population_type`，允许 `all/home/work/home\|work/work\|home` |
+| `age` | `basic` | `all` | 多选值过滤，映射 `age_type` |
+| `gender` | `basic` | `all` | 多选值过滤，映射 `gende` |
 | `ptype` | `scene` | `hieg_end_individual` | 列名参数，只允许场景标签白名单列 |
 | `ptype` | `finance_app` | `debit_card_bc` | 列名参数，只允许金融 app 白名单列 |
 | `ptype` | `land_val` | `average_rent` | 列名参数，只允许 `average_rent/average_house_price` |
 
-SQL View 文件使用 GeoServer 的 `%param%` 占位符。`scene`、`finance_app`、`land_val` 的 `ptype` 会直接替换到 SQL 列名位置，因此必须保持 `application.yml` 中的白名单正则足够严格。
+SQL View 文件使用 GeoServer 的 `%param%` 占位符。`basic` 的 `ptype/age/gender` 支持用 `|` 多选过滤，并在过滤后按 `grid_id/geom_polygon` 汇总 `total_num`。`scene`、`finance_app`、`land_val` 的 `ptype` 会直接替换到 SQL 列名位置，因此必须保持 `application.yml` 中的白名单正则足够严格。
 
 ## 请求示例
 
@@ -157,6 +157,12 @@ GET /geoserver/site_selection/wms?
   format=image/png&
   transparent=true&
   viewparams=batchId:1001;county:-1;ptype:all;age:all;gender:all
+```
+
+基础标签多选时建议把 `|` 做 URL 编码：
+
+```text
+viewparams=batchId:1001;county:-1;ptype:home%7Cwork;age:all;gender:all
 ```
 
 动态列 WMS 示例：

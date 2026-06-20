@@ -41,15 +41,16 @@ class GeoServerSqlResourceTest {
     }
 
     @Test
-    void basicLayerMapsRequestParametersToFilterTotalColumns() throws Exception {
+    void basicLayerAggregatesFilteredMultiSelectParametersByGrid() throws Exception {
         String sql = read("sql/basic.sql");
 
         assertThat(sql).contains("FROM tb_grid_filter_num_total");
-        assertThat(sql).contains("COALESCE(num, 0) AS total_num");
+        assertThat(sql).contains("SUM(COALESCE(num, 0)) AS total_num");
         assertThat(sql).contains("code_coun = CAST('%county%' AS INTEGER)");
         assertThat(sql).contains("population_type = ANY (string_to_array('%ptype%', '|'))");
         assertThat(sql).contains("age_type = ANY (string_to_array('%age%', '|'))");
         assertThat(sql).contains("gende = ANY (string_to_array('%gender%', '|'))");
+        assertThat(sql).contains("GROUP BY grid_id, geom_polygon");
     }
 
     @Test
