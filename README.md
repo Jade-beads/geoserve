@@ -108,13 +108,13 @@ mvn -Dmaven.repo.local=.m2/repository spring-boot:run
 
 图层：
 
-| 图层名 | 服务 | SQL 模板 | 参数 | 默认样式 |
-| --- | --- | --- | --- | --- |
-| `basic_all` | WMTS | `classpath:sql/basic_all.sql` | `batchId` | `count_style` |
-| `basic` | WMS | `classpath:sql/basic.sql` | `batchId county ptype age gender` | `count_style` |
-| `scene` | WMS | `classpath:sql/scene.sql` | `batchId county ptype` | `count_style` |
-| `finance_app` | WMS | `classpath:sql/finance_app.sql` | `batchId county ptype` | `count_style` |
-| `land_val` | WMS | `classpath:sql/land_val.sql` | `batchId county ptype` | `price_style` |
+| 图层名 | 服务 | SQL 模板 | 数据表 | 参数 | 默认样式 |
+| --- | --- | --- | --- | --- | --- |
+| `basic_all` | WMTS | `classpath:sql/basic_all.sql` | `tb_grid_permanent_num_total` | `batchId` | `count_style` |
+| `basic` | WMS | `classpath:sql/basic.sql` | `tb_grid_filter_num_total` | `batchId county ptype age gender` | `count_style` |
+| `scene` | WMS | `classpath:sql/scene.sql` | `tb_grid_personalized_portrait_total` | `batchId county ptype` | `count_style` |
+| `finance_app` | WMS | `classpath:sql/finance_app.sql` | `tb_grid_finance_app_total` | `batchId county ptype` | `count_style` |
+| `land_val` | WMS | `classpath:sql/land_val.sql` | `tb_grid_land_value_total` | `batchId county ptype` | `price_style` |
 
 所有 SQL View 模板统一返回：
 
@@ -122,19 +122,22 @@ mvn -Dmaven.repo.local=.m2/repository spring-boot:run
 - `geom_polygon`
 - `total_num`
 
-几何字段统一为 `geom_polygon`，SRID 为 `4326`。真实业务表名暂时用 `replace_with_*_source` 占位，联调前替换对应 SQL 文件即可。
+几何字段统一为 `geom_polygon`，SRID 为 `4326`。SQL 已对应热力图分区任务写入的 5 张总表。
 
 ## 参数规则
 
-| 参数 | 默认值 | 正则 |
-| --- | --- | --- |
-| `batchId` | 每个图层单独配置 | `^[0-9]+$` |
-| `county` | `-1` | `^(-1|[0-9]+)$` |
-| `ptype` | `all` | `^(all|[A-Za-z0-9_-]+(\|[A-Za-z0-9_-]+)*)$` |
-| `age` | `all` | `^(all|[A-Za-z0-9_-]+(\|[A-Za-z0-9_-]+)*)$` |
-| `gender` | `all` | `^(all|[A-Za-z0-9_-]+(\|[A-Za-z0-9_-]+)*)$` |
+| 参数 | 适用图层 | 默认值 | 规则 |
+| --- | --- | --- | --- |
+| `batchId` | 全部图层 | 每个图层单独配置 | 只能是数字 |
+| `county` | WMS 图层 | `-1` | `-1` 表示全部县区；其他值映射 `code_coun` |
+| `ptype` | `basic` | `all` | 值过滤，映射 `population_type`，允许 `all/home/work/home\|work/work\|home` |
+| `age` | `basic` | `all` | 值过滤，映射 `age_type` |
+| `gender` | `basic` | `all` | 值过滤，映射 `gende` |
+| `ptype` | `scene` | `hieg_end_individual` | 列名参数，只允许场景标签白名单列 |
+| `ptype` | `finance_app` | `debit_card_bc` | 列名参数，只允许金融 app 白名单列 |
+| `ptype` | `land_val` | `average_rent` | 列名参数，只允许 `average_rent/average_house_price` |
 
-SQL View 文件使用 GeoServer 的 `%param%` 占位符。不要在 Java 代码中拼接用户输入 SQL；动态条件统一通过 GeoServer `viewparams` 传入。
+SQL View 文件使用 GeoServer 的 `%param%` 占位符。`scene`、`finance_app`、`land_val` 的 `ptype` 会直接替换到 SQL 列名位置，因此必须保持 `application.yml` 中的白名单正则足够严格。
 
 ## 请求示例
 
@@ -154,6 +157,30 @@ GET /geoserver/site_selection/wms?
   format=image/png&
   transparent=true&
   viewparams=batchId:1001;county:-1;ptype:all;age:all;gender:all
+```
+
+动态列 WMS 示例：
+
+```text
+GET /geoserver/site_selection/wms?
+  service=WMS&
+  version=1.1.0&
+  request=GetMap&
+  layers=site_selection:scene&
+  styles=&
+  bbox=<minx>,<miny>,<maxx>,<maxy>&
+  width=768&
+  height=512&
+  srs=EPSG:4326&
+  format=image/png&
+  transparent=true&
+  viewparams=batchId:1001;county:-1;ptype:hieg_end_individual
+```
+
+如果要请求场景标签里的 `"3c"` 列，双引号需要 URL 编码：
+
+```text
+viewparams=batchId:1001;county:-1;ptype:%223c%22
 ```
 
 WMTS 参数化瓦片示例：

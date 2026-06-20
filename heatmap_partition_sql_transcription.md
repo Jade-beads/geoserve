@@ -386,9 +386,7 @@ public class HeatMapPartTableServiceImpl implements HeatMapPartTableService {
     }
 ```
 
-## 基础标签 `basicTagData` 开头
-
-图片最后只截到这个方法开头，后续 SQL 没有出现在当前图片里。
+## 基础标签 `basicTagData`
 
 ```java
     //基础标签
@@ -403,4 +401,55 @@ public class HeatMapPartTableServiceImpl implements HeatMapPartTableService {
                 log.info("表：{},分区：{} 已存在",BASIC_TAG_MASTER_TB_NAME,batchId);
             } else {
                 throw e;
+            }
+        }
+        log.info("tb:{},batch:{},基础标签分区完成",BASIC_TAG_MASTER_TB_NAME,batchId);
+
+        //分区索引创建
+        log.info("tb:{},batch:{},开始处理基础标签分区索引",BASIC_TAG_MASTER_TB_NAME,batchId);
+        String tbName = SqlUtil.getPartTbName(BASIC_TAG_MASTER_TB_NAME, batchId);
+        String sql=
+//                "CREATE INDEX idx_gfn_"+batchId+"_geom " +
+//                "ON "+BASIC_TAG_MASTER_TB_NAME+" USING GIST (geom_polygon) local (partition "+tbName+");" +
+//                "CREATE INDEX idx_gfn_"+batchId+"_grid_id " +
+//                "ON "+BASIC_TAG_MASTER_TB_NAME+" (grid_id) local (partition "+tbName+");" +
+//                "CREATE INDEX idx_gfn_"+batchId+"_code_city " +
+//                "ON "+BASIC_TAG_MASTER_TB_NAME+" (code_city) local (partition "+tbName+");" +
+//                "CREATE INDEX idx_gfn_"+batchId+"_code_coun " +
+//                "ON "+BASIC_TAG_MASTER_TB_NAME+" (code_coun) local (partition "+tbName+");" +
+//                "CREATE INDEX idx_gfn_"+batchId+"_dim " +
+//                "ON "+BASIC_TAG_MASTER_TB_NAME+" (population_type, age_type, gende) local (partition "+tbName+");" +
+                "alter index idx_gfn_total_geom rebuild;" +
+                "alter index idx_gfn_total_grid_id rebuild;" +
+                "alter index idx_gfn_total_code_city rebuild;" +
+                "alter index idx_gfn_total_code_coun rebuild;" +
+                "alter index idx_gfn_total_dim rebuild;";
+        publicMapper.execUpdate(sql);
+        log.info("tb:{},batch:{},基础标签分区索引完成",BASIC_TAG_MASTER_TB_NAME,batchId);
+
+        //数据关联保存
+        log.info("tb:{},batch:{},开始基础标签数据保存",BASIC_TAG_MASTER_TB_NAME,batchId);
+        String insertSql=
+                "INSERT INTO "+tbName+" ( " +
+                "     batch_id,grid_id,geom_polygon,name_city,code_city,name_coun,code_coun, " +
+                "     population_type,age_type,gende,num" +
+                ") " +
+                "SELECT " +
+                "     "+batchId+" AS batch_id, " +
+                "     g.grid_id, " +
+                "     g.geom_polygon, " +
+                "     g.name_city, " +
+                "     g.code_city, " +
+                "     g.name_coun, " +
+                "     g.code_coun, " +
+                "     n.population_type, " +
+                "     n.age_type, " +
+                "     n.gende, " +
+                "     n.num " +
+                "FROM tb_grid g " +
+                "JOIN tb_grid_filter_num n ON g.grid_id = n.grid_id " +
+                "WHERE g.code_city="+cityCode+" AND n.date='"+date+"' AND n.population_type IN ('home','work');";
+        int i = publicMapper.execInsert(insertSql);
+        log.info("tb:{},batch:{},基础标签数据保存完成,共: {}条",BASIC_TAG_MASTER_TB_NAME,batchId,i);
+    }
 ```

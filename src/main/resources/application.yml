@@ -79,7 +79,7 @@ geoserver:
           regexp-validator: "^(-1|[0-9]+)$"
         - name: ptype
           default-value: all
-          regexp-validator: "^(all|[A-Za-z0-9_-]+(\\|[A-Za-z0-9_-]+)*)$"
+          regexp-validator: '^(all|home|work|home\|work|work\|home)$'
         - name: age
           default-value: all
           regexp-validator: "^(all|[A-Za-z0-9_-]+(\\|[A-Za-z0-9_-]+)*)$"
@@ -103,8 +103,9 @@ geoserver:
           default-value: "-1"
           regexp-validator: "^(-1|[0-9]+)$"
         - name: ptype
-          default-value: all
-          regexp-validator: "^(all|[A-Za-z0-9_-]+(\\|[A-Za-z0-9_-]+)*)$"
+          # ptype 在该图层中是列名参数，必须严格限制在分区总表已有列内。
+          default-value: hieg_end_individual
+          regexp-validator: '^(hieg_end_individual|college_student|white_collar|senior_middle_class|flexible_employment|millennials|financial_management|quinguagenarian|urban_silver_haired|blue_collar|homebound_population|loyalty_data_high|loyalty_data_mid|loyalty_data_low|maternity|shopping|fashion_icon|wool|business_traveler|workaholic|"3c"|game_animation|travel_expert|finance|medical_staff|servant_public_institution|white_collar_general_staff|worker_service_staff|teacher|farmer_other|want_to_decorate|want_to_car|have_children|there_room)$'
 
     - name: finance_app
       title: 金融 app
@@ -122,8 +123,9 @@ geoserver:
           default-value: "-1"
           regexp-validator: "^(-1|[0-9]+)$"
         - name: ptype
-          default-value: all
-          regexp-validator: "^(all|[A-Za-z0-9_-]+(\\|[A-Za-z0-9_-]+)*)$"
+          # ptype 在该图层中是列名参数，必须严格限制在分区总表已有列内。
+          default-value: debit_card_bc
+          regexp-validator: '^(debit_card_bc|debit_card_abc|debit_card_icbc|debit_card_cbc|debit_card_cmbc|debit_card_cmsb|debit_card_pab|debit_card_spdb|debit_card_cib|debit_card_ccb|debit_card_ceb|debit_card_hxb|debit_card_psbc|credit_card_bocom|debit_card_bocom|credit_card_cmbc|debit_card_bosc|debit_card_crcb)$'
 
     - name: land_val
       title: 房价租金
@@ -141,5 +143,6 @@ geoserver:
           default-value: "-1"
           regexp-validator: "^(-1|[0-9]+)$"
         - name: ptype
-          default-value: all
-          regexp-validator: "^(all|[A-Za-z0-9_-]+(\\|[A-Za-z0-9_-]+)*)$"
+          # ptype 在该图层中是列名参数，必须严格限制在分区总表已有列内。
+          default-value: average_rent
+          regexp-validator: '^(average_rent|average_house_price)$'

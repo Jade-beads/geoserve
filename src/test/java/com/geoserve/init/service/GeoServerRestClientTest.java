@@ -155,11 +155,12 @@ class GeoServerRestClientTest {
         server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces/site_selection/datastores/gauss_store/featuretypes?recalculate=nativebbox,latlonbbox"))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(content().string(containsString("JDBC_VIRTUAL_TABLE")))
-                .andExpect(content().string(containsString("FROM replace_with_basic_source")))
+                .andExpect(content().string(containsString("FROM tb_grid_filter_num_total")))
+                .andExpect(content().string(containsString("COALESCE(num, 0) AS total_num")))
                 .andExpect(content().string(containsString("\"geometry\":{\"name\":\"geom_polygon\",\"type\":\"Polygon\",\"srid\":4326}")))
                 .andExpect(content().string(containsString("\"name\":\"batchId\",\"defaultValue\":\"1001\",\"regexpValidator\":\"^[0-9]+$\"")))
                 .andExpect(content().string(containsString("\"name\":\"county\",\"defaultValue\":\"-1\",\"regexpValidator\":\"^(-1|[0-9]+)$\"")))
-                .andExpect(content().string(containsString("\"name\":\"ptype\",\"defaultValue\":\"all\",\"regexpValidator\":\"^(all|[A-Za-z0-9_-]+(\\\\|[A-Za-z0-9_-]+)*)$\"")))
+                .andExpect(content().string(containsString("\"name\":\"ptype\",\"defaultValue\":\"all\",\"regexpValidator\":\"^(all|home|work|home\\\\|work|work\\\\|home)$\"")))
                 .andRespond(withStatus(HttpStatus.CREATED));
         server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/layers/site_selection:basic"))
                 .andExpect(method(HttpMethod.PUT))
@@ -257,7 +258,11 @@ class GeoServerRestClientTest {
     }
 
     private SqlParameter ptype() {
-        return stringPipeParameter("ptype");
+        SqlParameter parameter = new SqlParameter();
+        parameter.setName("ptype");
+        parameter.setDefaultValue("all");
+        parameter.setRegexpValidator("^(all|home|work|home\\|work|work\\|home)$");
+        return parameter;
     }
 
     private SqlParameter age() {
