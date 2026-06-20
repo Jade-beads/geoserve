@@ -8,7 +8,6 @@ import com.geoserve.init.config.GeoServerInitProperties.ParameterFilter;
 import com.geoserve.init.config.GeoServerInitProperties.SqlParameter;
 import com.geoserve.init.config.GeoServerInitProperties.Style;
 import com.geoserve.init.config.GeoServerInitProperties.Wmts;
-import com.geoserve.init.config.GeoServerInitProperties.Workspace;
 import com.geoserve.init.model.ResourceAction;
 import com.geoserve.init.model.ResourceStatus;
 import com.geoserve.init.model.SourceType;
@@ -27,6 +26,7 @@ import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
+import static org.springframework.test.web.client.ExpectedCount.never;
 import static org.springframework.test.web.client.ExpectedCount.once;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
@@ -38,7 +38,8 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 /**
  * 不连接真实 GeoServer，测试 GeoServer HTTP 契约。
  *
- * MockRestServiceServer 会验证 GeoServerRestClient 生成的 REST 路径、方法、请求头和关键 payload 片段。
+ * MockRestServiceServer 会验证 GeoServerRestClient 在单工作区、单数据源模型下生成的
+ * REST 路径、方法、请求头和关键 payload 片段。
  */
 class GeoServerRestClientTest {
 
@@ -53,61 +54,56 @@ class GeoServerRestClientTest {
         properties.setBaseUrl("http://geoserver.local/geoserver");
         properties.setUsername("test-user");
         properties.setPassword("test-password");
+        properties.setWorkspace("site_selection");
+        properties.setDatastore(datastore());
 
         client = new GeoServerRestClient(restTemplate, properties, new DefaultResourceLoader());
         server = MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(false).build();
     }
 
     @Test
-    void ensureWorkspaceSkipsWhenWorkspaceAlreadyExists() {
-        Workspace workspace = new Workspace();
-        workspace.setName("demo");
-
+    void ensureWorkspaceUsesSingleConfiguredWorkspaceAndSkipsWhenAlreadyExists() {
         // 已存在资源返回 200，因此不应继续发送 POST。
-        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces/demo.json"))
+        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces/site_selection.json"))
                 .andExpect(method(HttpMethod.GET))
                 .andExpect(header(HttpHeaders.AUTHORIZATION, basicAuth()))
-                .andRespond(withSuccess("{\"workspace\":{\"name\":\"demo\"}}", MediaType.APPLICATION_JSON));
+                .andRespond(withSuccess("{\"workspace\":{\"name\":\"site_selection\"}}", MediaType.APPLICATION_JSON));
 
-        ResourceAction action = client.ensureWorkspace(workspace);
+        ResourceAction action = client.ensureWorkspace();
 
         assertThat(action.getStatus()).isEqualTo(ResourceStatus.SKIPPED);
-        assertThat(action.getName()).isEqualTo("demo");
+        assertThat(action.getName()).isEqualTo("site_selection");
         server.verify();
     }
 
     @Test
-    void ensureWorkspaceCreatesWhenWorkspaceIsMissing() {
-        Workspace workspace = new Workspace();
-        workspace.setName("demo");
-
+    void ensureWorkspaceCreatesSingleConfiguredWorkspaceWhenMissing() {
         // 404 触发工作区的幂等创建路径。
-        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces/demo.json"))
+        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces/site_selection.json"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withStatus(HttpStatus.NOT_FOUND));
         server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces"))
                 .andExpect(method(HttpMethod.POST))
-                .andExpect(content().json("{\"workspace\":{\"name\":\"demo\"}}"))
+                .andExpect(content().json("{\"workspace\":{\"name\":\"site_selection\"}}"))
                 .andRespond(withStatus(HttpStatus.CREATED));
 
-        ResourceAction action = client.ensureWorkspace(workspace);
+        ResourceAction action = client.ensureWorkspace();
 
         assertThat(action.getStatus()).isEqualTo(ResourceStatus.CREATED);
         server.verify();
     }
 
     @Test
-    void ensureStyleUploadsClasspathSldWhenStyleIsMissing() {
+    void ensureStyleUsesRootWorkspaceAndUploadsClasspathSldWhenStyleIsMissing() {
         Style style = new Style();
-        style.setWorkspace("demo");
-        style.setName("grid_polygon");
-        style.setSldLocation("classpath:styles/test-polygon.sld");
+        style.setName("count_style");
+        style.setSldLocation("classpath:styles/count-style.sld");
 
-        // 样式缺失时，客户端会读取 classpath SLD 并上传到工作区。
-        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces/demo/styles/grid_polygon.json"))
+        // 样式缺失时，客户端会读取 classpath SLD 并上传到根工作区。
+        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces/site_selection/styles/count_style.json"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withStatus(HttpStatus.NOT_FOUND));
-        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces/demo/styles?name=grid_polygon"))
+        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces/site_selection/styles?name=count_style"))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(content().contentType("application/vnd.ogc.sld+xml"))
                 .andExpect(content().string(containsString("<sld:StyledLayerDescriptor")))
@@ -116,18 +112,19 @@ class GeoServerRestClientTest {
         ResourceAction action = client.ensureStyle(style);
 
         assertThat(action.getStatus()).isEqualTo(ResourceStatus.CREATED);
+        assertThat(action.getName()).isEqualTo("site_selection:count_style");
         server.verify();
     }
 
     @Test
-    void ensureDatastoreCreatesPostgisCompatibleGaussDbStoreWhenMissing() {
+    void ensureDatastoreUsesRootWorkspaceAndCreatesPostgisCompatibleGaussDbStoreWhenMissing() {
         Datastore datastore = datastore();
 
         // 数据源 payload 必须使用 GeoServer PostGIS entry 结构，以兼容 GaussDB/openGauss。
-        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces/demo/datastores/gauss_store.json"))
+        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces/site_selection/datastores/gauss_store.json"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withStatus(HttpStatus.NOT_FOUND));
-        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces/demo/datastores"))
+        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces/site_selection/datastores"))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(content().string(containsString("\"dbtype\",\"$\":\"postgis\"")))
                 .andExpect(content().string(containsString("\"host\",\"$\":\"db.example.local\"")))
@@ -135,33 +132,38 @@ class GeoServerRestClientTest {
                 .andExpect(content().string(containsString("\"database\",\"$\":\"gisdb\"")))
                 .andExpect(content().string(containsString("\"schema\",\"$\":\"public\"")))
                 .andExpect(content().string(containsString("\"user\",\"$\":\"gauss\"")))
+                .andExpect(content().string(containsString("\"namespace\",\"$\":\"site_selection\"")))
                 .andRespond(withStatus(HttpStatus.CREATED));
 
         ResourceAction action = client.ensureDatastore(datastore);
 
         assertThat(action.getStatus()).isEqualTo(ResourceStatus.CREATED);
+        assertThat(action.getName()).isEqualTo("site_selection:gauss_store");
         server.verify();
     }
 
     @Test
-    void ensureSqlViewLayerCreatesVirtualTableAndSetsDefaultStyleWhenLayerIsMissing() {
-        Layer layer = sqlViewLayer();
+    void ensureSqlViewLayerUsesRootWorkspaceDatastoreBatchDefaultAndSetsDefaultStyle() {
+        Layer layer = sqlViewLayer("basic", false);
+        layer.setDefaultStyle("count_style");
+        layer.setSqlLocation("classpath:sql/basic.sql");
 
         // 图层创建会发送 JDBC_VIRTUAL_TABLE 元数据，之后再用第二个 PUT 绑定默认样式。
-        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/layers/demo:grid_finance.json"))
+        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/layers/site_selection:basic.json"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withStatus(HttpStatus.NOT_FOUND));
-        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces/demo/datastores/gauss_store/featuretypes?recalculate=nativebbox,latlonbbox"))
+        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces/site_selection/datastores/gauss_store/featuretypes?recalculate=nativebbox,latlonbbox"))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(content().string(containsString("JDBC_VIRTUAL_TABLE")))
-                .andExpect(content().string(containsString("FROM v_grid_finance_app")))
+                .andExpect(content().string(containsString("FROM replace_with_basic_source")))
                 .andExpect(content().string(containsString("\"geometry\":{\"name\":\"geom_polygon\",\"type\":\"Polygon\",\"srid\":4326}")))
-                .andExpect(content().string(containsString("\"name\":\"city\",\"defaultValue\":\"-1\",\"regexpValidator\":\"^[-|\\\\w]*$\"")))
-                .andExpect(content().string(containsString("\"name\":\"type\",\"defaultValue\":\"all\",\"regexpValidator\":\"^[\\\\w|]*$\"")))
+                .andExpect(content().string(containsString("\"name\":\"batchId\",\"defaultValue\":\"1001\",\"regexpValidator\":\"^[0-9]+$\"")))
+                .andExpect(content().string(containsString("\"name\":\"county\",\"defaultValue\":\"-1\",\"regexpValidator\":\"^(-1|[0-9]+)$\"")))
+                .andExpect(content().string(containsString("\"name\":\"ptype\",\"defaultValue\":\"all\",\"regexpValidator\":\"^(all|[A-Za-z0-9_-]+(\\\\|[A-Za-z0-9_-]+)*)$\"")))
                 .andRespond(withStatus(HttpStatus.CREATED));
-        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/layers/demo:grid_finance"))
+        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/layers/site_selection:basic"))
                 .andExpect(method(HttpMethod.PUT))
-                .andExpect(content().string(containsString("\"defaultStyle\":{\"name\":\"demo:grid_polygon\"}")))
+                .andExpect(content().string(containsString("\"defaultStyle\":{\"name\":\"site_selection:count_style\"}")))
                 .andRespond(withSuccess());
 
         ResourceAction action = client.ensureFeatureType(layer);
@@ -171,22 +173,24 @@ class GeoServerRestClientTest {
     }
 
     @Test
-    void ensureGwcLayerCreatesRegexViewparamsFilterWhenTileLayerIsMissing() {
-        Layer layer = sqlViewLayer();
+    void ensureGwcLayerCreatesEpsg3857PngRegexBatchIdFilterWhenBasicAllIsMissing() {
+        Layer layer = sqlViewLayer("basic_all", true);
+        layer.setSqlLocation("classpath:sql/basic_all.sql");
 
-        // GWC 图层 XML 必须包含 VIEWPARAMS，让参数化 WMTS 请求生成独立缓存 key。
-        server.expect(once(), requestTo("http://geoserver.local/geoserver/gwc/rest/layers/demo:grid_finance.xml"))
+        // GWC 图层 XML 必须包含 VIEWPARAMS，让 batchId 参数化 WMTS 请求生成独立缓存 key。
+        server.expect(once(), requestTo("http://geoserver.local/geoserver/gwc/rest/layers/site_selection:basic_all.xml"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withStatus(HttpStatus.NOT_FOUND));
-        server.expect(once(), requestTo("http://geoserver.local/geoserver/gwc/rest/layers/demo:grid_finance.xml"))
+        server.expect(once(), requestTo("http://geoserver.local/geoserver/gwc/rest/layers/site_selection:basic_all.xml"))
                 .andExpect(method(HttpMethod.PUT))
                 .andExpect(content().contentType(MediaType.APPLICATION_XML))
-                .andExpect(content().string(containsString("<name>demo:grid_finance</name>")))
-                .andExpect(content().string(containsString("<gridSetName>EPSG:4326</gridSetName>")))
+                .andExpect(content().string(containsString("<name>site_selection:basic_all</name>")))
+                .andExpect(content().string(containsString("<gridSetName>EPSG:3857</gridSetName>")))
                 .andExpect(content().string(containsString("<string>image/png</string>")))
                 .andExpect(content().string(containsString("<regexParameterFilter>")))
                 .andExpect(content().string(containsString("<key>VIEWPARAMS</key>")))
-                .andExpect(content().string(containsString("<defaultValue>city:-1;county:-1;type:all</defaultValue>")))
+                .andExpect(content().string(containsString("<defaultValue>batchId:1001</defaultValue>")))
+                .andExpect(content().string(containsString("<regex>^batchId:[0-9]+$</regex>")))
                 .andRespond(withSuccess());
 
         ResourceAction action = client.ensureGwcLayer(layer);
@@ -195,10 +199,22 @@ class GeoServerRestClientTest {
         server.verify();
     }
 
+    @Test
+    void ensureGwcLayerSkipsWmsOnlyLayerWithoutCallingGwcRest() {
+        Layer layer = sqlViewLayer("scene", false);
+
+        server.expect(never(), requestTo("http://geoserver.local/geoserver/gwc/rest/layers/site_selection:scene.xml"));
+
+        ResourceAction action = client.ensureGwcLayer(layer);
+
+        assertThat(action.getStatus()).isEqualTo(ResourceStatus.SKIPPED);
+        assertThat(action.getMessage()).contains("WMTS disabled");
+        server.verify();
+    }
+
     private Datastore datastore() {
         // 测试数据源模拟脱敏后的 GaussDB/openGauss PostGIS 兼容配置。
         Datastore datastore = new Datastore();
-        datastore.setWorkspace("demo");
         datastore.setName("gauss_store");
         datastore.setDescription("gauss_store");
         datastore.setHost("db.example.local");
@@ -211,53 +227,68 @@ class GeoServerRestClientTest {
         return datastore;
     }
 
-    private Layer sqlViewLayer() {
+    private Layer sqlViewLayer(String name, boolean wmtsEnabled) {
         // 测试图层模拟生产 SQL View 链路：geometry + parameters + WMTS filter。
         Geometry geometry = new Geometry();
         geometry.setName("geom_polygon");
         geometry.setType("Polygon");
         geometry.setSrid(4326);
 
-        SqlParameter city = new SqlParameter();
-        city.setName("city");
-        city.setDefaultValue("-1");
-        city.setRegexpValidator("^[-|\\w]*$");
+        Layer layer = new Layer();
+        layer.setName(name);
+        layer.setTitle(name);
+        layer.setSourceType(SourceType.SQL_VIEW);
+        layer.setSqlLocation("classpath:sql/" + name + ".sql");
+        layer.setBatchIdDefault("1001");
+        layer.setSrs("EPSG:4326");
+        layer.setGeometry(geometry);
+        layer.setDefaultStyle("count_style");
+        layer.setSqlParameters(asList(county(), ptype(), age(), gender()));
+        layer.setWmts(wmts(wmtsEnabled));
+        return layer;
+    }
 
-        SqlParameter county = new SqlParameter();
-        county.setName("county");
-        county.setDefaultValue("-1");
-        county.setRegexpValidator("^[-|\\w]*$");
+    private SqlParameter county() {
+        SqlParameter parameter = new SqlParameter();
+        parameter.setName("county");
+        parameter.setDefaultValue("-1");
+        parameter.setRegexpValidator("^(-1|[0-9]+)$");
+        return parameter;
+    }
 
-        SqlParameter type = new SqlParameter();
-        type.setName("type");
-        type.setDefaultValue("all");
-        type.setRegexpValidator("^[\\w|]*$");
+    private SqlParameter ptype() {
+        return stringPipeParameter("ptype");
+    }
 
+    private SqlParameter age() {
+        return stringPipeParameter("age");
+    }
+
+    private SqlParameter gender() {
+        return stringPipeParameter("gender");
+    }
+
+    private SqlParameter stringPipeParameter(String name) {
+        SqlParameter parameter = new SqlParameter();
+        parameter.setName(name);
+        parameter.setDefaultValue("all");
+        parameter.setRegexpValidator("^(all|[A-Za-z0-9_-]+(\\|[A-Za-z0-9_-]+)*)$");
+        return parameter;
+    }
+
+    private Wmts wmts(boolean enabled) {
         ParameterFilter viewparams = new ParameterFilter();
         viewparams.setType("regex");
         viewparams.setKey("VIEWPARAMS");
-        viewparams.setDefaultValue("city:-1;county:-1;type:all");
-        viewparams.setRegex("^city:[0-9-]+;county:[0-9-]+;type:[\\w|]+$");
+        viewparams.setDefaultValue("batchId:1001");
+        viewparams.setRegex("^batchId:[0-9]+$");
 
         Wmts wmts = new Wmts();
-        wmts.setEnabled(true);
-        wmts.setGridsets(Collections.singletonList("EPSG:4326"));
+        wmts.setEnabled(enabled);
+        wmts.setGridsets(Collections.singletonList("EPSG:3857"));
         wmts.setFormats(Collections.singletonList("image/png"));
         wmts.setParameterFilters(Collections.singletonList(viewparams));
-
-        Layer layer = new Layer();
-        layer.setWorkspace("demo");
-        layer.setDatastore("gauss_store");
-        layer.setName("grid_finance");
-        layer.setTitle("Grid Finance");
-        layer.setSourceType(SourceType.SQL_VIEW);
-        layer.setSqlLocation("classpath:sql/grid_finance.sql");
-        layer.setSrs("EPSG:4326");
-        layer.setGeometry(geometry);
-        layer.setDefaultStyle("grid_polygon");
-        layer.setSqlParameters(asList(city, county, type));
-        layer.setWmts(wmts);
-        return layer;
+        return wmts;
     }
 
     private String basicAuth() {

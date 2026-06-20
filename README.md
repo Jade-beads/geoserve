@@ -1,33 +1,34 @@
 # GeoServer 初始化服务
 
-这是一个兼容 JDK 8 的 Spring Boot 服务，用于通过 HTTP REST API 初始化 GeoServer 资源。
+这是一个兼容 JDK 8 的 Spring Boot 服务，用于通过 HTTP REST API 初始化 GeoServer 资源。当前版本按“单工作区 + 单高斯数据库数据源”设计，默认工作区为 `site_selection`，默认数据源为 `gauss_store`。
 
 ## 功能说明
 
-- 创建缺失的工作区。
-- 从 classpath 中的 SLD 文件创建缺失的工作区样式。
-- 为 GaussDB/openGauss 部署创建 PostGIS 兼容的数据源。
-- 创建缺失的普通表图层或 SQL View 图层。
-- 为新建图层设置默认样式。
-- 创建缺失的 GeoWebCache WMTS 图层配置，并支持正则参数过滤器。
-- 不会删除或覆盖已有的 GeoServer 资源。
+- 创建缺失的 `site_selection` 工作区。
+- 创建缺失的工作区样式：`count_style`、`price_style`。
+- 创建缺失的 GaussDB/openGauss PostGIS 兼容数据源：`gauss_store`。
+- 创建缺失的 SQL View 图层：`basic_all`、`basic`、`scene`、`finance_app`、`land_val`。
+- 为图层设置默认样式。
+- 只为 `basic_all` 创建 GeoWebCache WMTS 配置，使用 `EPSG:3857` 和 `image/png`。
+- 每一步都会先判断资源是否存在；存在则返回 `SKIPPED` 并继续执行下一步，不删除、不覆盖、不重建已有资源。
 
 ## 接口
 
-- `GET /api/geoserver/status`
-- `POST /api/geoserver/init`
+- `GET /api/geoserver/status`：检查 GeoServer 地址、认证和版本。
+- `POST /api/geoserver/init`：执行初始化流程。
 
 `POST /api/geoserver/init` 会返回每个资源的执行结果，状态包括 `CREATED`、`SKIPPED` 或 `FAILED`。
 
-## 代码链路
+## 初始化链路
 
 初始化主链路如下：
 
 1. `GeoServerController` 接收 `/api/geoserver/status` 和 `/api/geoserver/init` 请求。
-2. `GeoServerInitService` 按 workspace、style、datastore、layer、GWC/WMTS 的顺序编排初始化步骤。
-3. `GeoServerRestClient` 负责每一步真实的 GeoServer REST/GWC REST 请求，并保持“先查，缺失再创建”的幂等策略。
-4. `GeoServerInitProperties` 绑定 `application.yml` 和环境变量，作为所有资源名称、数据库参数、SQL View 参数、WMTS 参数过滤器的配置来源。
-5. `src/main/resources/sql/*.sql` 保存 SQL View 内容，`src/main/resources/styles/*.sld` 保存 GeoServer 样式内容。
+2. `GeoServerInitService` 按 `workspace -> styles -> datastore -> layers -> GWC/WMTS` 顺序编排初始化。
+3. `GeoServerRestClient` 执行真实的 GeoServer REST/GWC REST 请求。
+4. 每个 `ensure*` 方法都会先 `GET` 判断资源是否存在，不存在时再 `POST` 或 `PUT` 创建。
+5. `GeoServerInitProperties` 绑定 `application.yml` 和环境变量，作为资源名称、数据库参数、SQL View 参数、WMTS 参数过滤器的配置来源。
+6. `src/main/resources/sql/*.sql` 保存 SQL View 模板，`src/main/resources/styles/*.sld` 保存样式文件。
 
 如果需要从接口调用反查代码，可以按这个路径阅读：
 
@@ -39,19 +40,18 @@
 mvn -Dmaven.repo.local=.m2/repository spring-boot:run
 ```
 
-服务会读取 `src/main/resources/application.yml`。大部分配置也可以通过环境变量覆盖。
+服务会读取 `src/main/resources/application.yml`。真实环境参数建议通过环境变量、CI 密钥或服务器启动脚本注入，不要提交到仓库。
 
 ## 配置真实环境参数
 
-仓库中提交的 `application.yml` 已经过脱敏处理，只保留安全的本地默认值和空凭据。不要把真实的 GeoServer 地址、数据库主机、用户名或密码提交到仓库。
-
-部署到真实环境时，按下面流程配置：
+仓库中的 `application.yml` 已脱敏，只保留本地默认值和空凭据。部署到真实环境时，按下面流程配置：
 
 1. 在仓库外准备私有环境变量文件、CI 密钥配置或服务器启动脚本。
-2. 填写下面列出的必需参数。
-3. 使用这些环境变量启动服务。
-4. 调用 `GET /api/geoserver/status` 检查连接状态。
-5. 状态正常后，再调用 `POST /api/geoserver/init` 执行初始化。
+2. 填写 GeoServer 地址、账号密码和 GaussDB/openGauss 连接参数。
+3. 如需调整默认批次，填写各图层的 `*_BATCH_ID_DEFAULT`。
+4. 使用这些环境变量启动服务。
+5. 调用 `GET /api/geoserver/status` 检查连接状态。
+6. 状态正常后，调用 `POST /api/geoserver/init` 执行初始化。
 
 必需运行参数：
 
@@ -60,7 +60,6 @@ mvn -Dmaven.repo.local=.m2/repository spring-boot:run
 | `GEOSERVER_BASE_URL` | GeoServer 根地址，需要以 `/geoserver` 结尾 | `http://<host>:<port>/geoserver` |
 | `GEOSERVER_USERNAME` | GeoServer REST 用户名 | `<username>` |
 | `GEOSERVER_PASSWORD` | GeoServer REST 密码 | `<password>` |
-| `GEOSERVER_WORKSPACE` | 需要创建或使用的工作区 | `geo_init_demo` |
 | `GAUSS_DB_HOST` | GeoServer 可访问的 GaussDB/openGauss 主机 | `<db-host>` |
 | `GAUSS_DB_PORT` | GaussDB/openGauss 端口 | `5432` |
 | `GAUSS_DB_NAME` | 数据库名称 | `<database>` |
@@ -72,7 +71,13 @@ mvn -Dmaven.repo.local=.m2/repository spring-boot:run
 
 | 参数 | 说明 | 默认值 |
 | --- | --- | --- |
+| `GEOSERVER_WORKSPACE` | 统一工作区名称；一般保持默认即可 | `site_selection` |
 | `GEOSERVER_INIT_RUN_ON_STARTUP` | 是否在应用启动时自动执行初始化 | `false` |
+| `BASIC_ALL_BATCH_ID_DEFAULT` | `basic_all` 的 `batchId` 默认值 | `1001` |
+| `BASIC_BATCH_ID_DEFAULT` | `basic` 的 `batchId` 默认值 | `1001` |
+| `SCENE_BATCH_ID_DEFAULT` | `scene` 的 `batchId` 默认值 | `1001` |
+| `FINANCE_APP_BATCH_ID_DEFAULT` | `finance_app` 的 `batchId` 默认值 | `1001` |
+| `LAND_VAL_BATCH_ID_DEFAULT` | `land_val` 的 `batchId` 默认值 | `1001` |
 
 启动命令示例：
 
@@ -80,19 +85,99 @@ mvn -Dmaven.repo.local=.m2/repository spring-boot:run
 export GEOSERVER_BASE_URL="http://<host>:<port>/geoserver"
 export GEOSERVER_USERNAME="<username>"
 export GEOSERVER_PASSWORD="<password>"
-export GEOSERVER_WORKSPACE="geo_init_demo"
+export GEOSERVER_WORKSPACE="site_selection"
 export GAUSS_DB_HOST="<db-host>"
 export GAUSS_DB_PORT="5432"
 export GAUSS_DB_NAME="<database>"
 export GAUSS_DB_SCHEMA="public"
 export GAUSS_DB_USERNAME="<db-user>"
 export GAUSS_DB_PASSWORD="<db-password>"
+export BASIC_ALL_BATCH_ID_DEFAULT="1001"
 
 mvn -Dmaven.repo.local=.m2/repository spring-boot:run
 ```
 
-## 配置说明
+## 资源清单
 
-- `geoserver.init.run-on-startup` 默认为 `false`；只有确实需要应用启动时自动初始化时，才把它设置为 `true`。
-- SQL View 文件使用 GeoServer 的 `%param%` 占位符。不要在 Java 代码里拼接来自请求的输入作为 SQL。
-- WMTS 参数化切片默认使用 `VIEWPARAMS`。请保持正则过滤器足够严格，避免缓存数量无限增长。
+样式：
+
+| 样式名 | 文件 | 用途 |
+| --- | --- | --- |
+| `count_style` | `classpath:styles/count-style.sld` | 人口数量语义配色，按 `total_num` 渲染 |
+| `price_style` | `classpath:styles/price-style.sld` | 价格语义配色，按 `total_num` 渲染 |
+
+图层：
+
+| 图层名 | 服务 | SQL 模板 | 参数 | 默认样式 |
+| --- | --- | --- | --- | --- |
+| `basic_all` | WMTS | `classpath:sql/basic_all.sql` | `batchId` | `count_style` |
+| `basic` | WMS | `classpath:sql/basic.sql` | `batchId county ptype age gender` | `count_style` |
+| `scene` | WMS | `classpath:sql/scene.sql` | `batchId county ptype` | `count_style` |
+| `finance_app` | WMS | `classpath:sql/finance_app.sql` | `batchId county ptype` | `count_style` |
+| `land_val` | WMS | `classpath:sql/land_val.sql` | `batchId county ptype` | `price_style` |
+
+所有 SQL View 模板统一返回：
+
+- `grid_id`
+- `geom_polygon`
+- `total_num`
+
+几何字段统一为 `geom_polygon`，SRID 为 `4326`。真实业务表名暂时用 `replace_with_*_source` 占位，联调前替换对应 SQL 文件即可。
+
+## 参数规则
+
+| 参数 | 默认值 | 正则 |
+| --- | --- | --- |
+| `batchId` | 每个图层单独配置 | `^[0-9]+$` |
+| `county` | `-1` | `^(-1|[0-9]+)$` |
+| `ptype` | `all` | `^(all|[A-Za-z0-9_-]+(\|[A-Za-z0-9_-]+)*)$` |
+| `age` | `all` | `^(all|[A-Za-z0-9_-]+(\|[A-Za-z0-9_-]+)*)$` |
+| `gender` | `all` | `^(all|[A-Za-z0-9_-]+(\|[A-Za-z0-9_-]+)*)$` |
+
+SQL View 文件使用 GeoServer 的 `%param%` 占位符。不要在 Java 代码中拼接用户输入 SQL；动态条件统一通过 GeoServer `viewparams` 传入。
+
+## 请求示例
+
+WMS 示例：
+
+```text
+GET /geoserver/site_selection/wms?
+  service=WMS&
+  version=1.1.0&
+  request=GetMap&
+  layers=site_selection:basic&
+  styles=&
+  bbox=<minx>,<miny>,<maxx>,<maxy>&
+  width=768&
+  height=512&
+  srs=EPSG:4326&
+  format=image/png&
+  transparent=true&
+  viewparams=batchId:1001;county:-1;ptype:all;age:all;gender:all
+```
+
+WMTS 参数化瓦片示例：
+
+```text
+GET /geoserver/gwc/service/wmts?
+  SERVICE=WMTS&
+  REQUEST=GetTile&
+  VERSION=1.0.0&
+  LAYER=site_selection:basic_all&
+  STYLE=&
+  TILEMATRIXSET=EPSG:3857&
+  TILEMATRIX=EPSG:3857:<z>&
+  TILEROW=<row>&
+  TILECOL=<col>&
+  FORMAT=image/png&
+  VIEWPARAMS=batchId:1001
+```
+
+`basic_all` 的 GWC 参数过滤器只允许 `VIEWPARAMS` 匹配 `^batchId:[0-9]+$`。不同 `batchId` 会进入不同缓存 key。
+
+## 注意事项
+
+- GeoServer 全局 WMS/WFS/WCS 能力不在本服务中关闭；本服务只负责发布资源和 `basic_all` 的 WMTS 缓存配置。
+- 已存在资源按幂等策略跳过，不会自动更新已有样式、数据源、图层或 GWC 配置。
+- 如果需要让已有资源跟随配置变更，请先在 GeoServer 中人工处理旧资源，或单独扩展“更新模式”。
+- 请保持 WMTS 参数正则足够严格，避免缓存数量失控。

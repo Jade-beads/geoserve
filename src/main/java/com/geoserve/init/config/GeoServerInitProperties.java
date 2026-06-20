@@ -13,7 +13,8 @@ import java.util.List;
  * application.yml/环境变量 -> 当前 properties 对象 ->
  * GeoServerInitService 编排 -> GeoServerRestClient REST payload。
  *
- * 这里刻意使用普通 JavaBean 而不是 Lombok，方便在 JDK 8 环境中直接编译运行。
+ * 当前版本固定为“单工作区 + 单数据源”模型：style、layer 不再单独配置 workspace/datastore，
+ * 统一使用根配置中的 workspace 和 datastore。
  */
 @ConfigurationProperties(prefix = "geoserver")
 public class GeoServerInitProperties {
@@ -24,15 +25,15 @@ public class GeoServerInitProperties {
     private String username;
     /** GeoServer REST Basic 认证密码。 */
     private String password;
+    /** 所有资源统一使用的工作区。 */
+    private String workspace = "site_selection";
     /** 启动行为开关。 */
     private Init init = new Init();
-    /** 在创建样式、数据源和图层前需要先确保存在的工作区。 */
-    private List<Workspace> workspaces = new ArrayList<Workspace>();
-    /** 需要上传到指定工作区的 SLD 样式。 */
+    /** 单个高斯数据库数据源配置。 */
+    private Datastore datastore = new Datastore();
+    /** 需要上传到根工作区的 SLD 样式。 */
     private List<Style> styles = new ArrayList<Style>();
-    /** 需要通过 GeoServer datastore REST API 创建的数据库数据源。 */
-    private List<Datastore> datastores = new ArrayList<Datastore>();
-    /** 数据源存在后需要发布的 Feature 图层。 */
+    /** 根数据源存在后需要发布的 Feature 图层。 */
     private List<Layer> layers = new ArrayList<Layer>();
 
     public String getBaseUrl() {
@@ -59,6 +60,14 @@ public class GeoServerInitProperties {
         this.password = password;
     }
 
+    public String getWorkspace() {
+        return workspace;
+    }
+
+    public void setWorkspace(String workspace) {
+        this.workspace = workspace;
+    }
+
     public Init getInit() {
         return init;
     }
@@ -67,12 +76,12 @@ public class GeoServerInitProperties {
         this.init = init;
     }
 
-    public List<Workspace> getWorkspaces() {
-        return workspaces;
+    public Datastore getDatastore() {
+        return datastore;
     }
 
-    public void setWorkspaces(List<Workspace> workspaces) {
-        this.workspaces = workspaces;
+    public void setDatastore(Datastore datastore) {
+        this.datastore = datastore;
     }
 
     public List<Style> getStyles() {
@@ -81,14 +90,6 @@ public class GeoServerInitProperties {
 
     public void setStyles(List<Style> styles) {
         this.styles = styles;
-    }
-
-    public List<Datastore> getDatastores() {
-        return datastores;
-    }
-
-    public void setDatastores(List<Datastore> datastores) {
-        this.datastores = datastores;
     }
 
     public List<Layer> getLayers() {
@@ -112,34 +113,11 @@ public class GeoServerInitProperties {
         }
     }
 
-    public static class Workspace {
-        /** GeoServer 工作区名称，同时也作为数据源和图层的 namespace。 */
-        private String name;
-
-        public String getName() {
-            return name;
-        }
-
-        public void setName(String name) {
-            this.name = name;
-        }
-    }
-
     public static class Style {
-        /** 样式所属工作区。 */
-        private String workspace;
-        /** 工作区内的样式名称。 */
+        /** 根工作区内的样式名称。 */
         private String name;
         /** SLD 资源位置，通常为 classpath:styles/*.sld。 */
         private String sldLocation;
-
-        public String getWorkspace() {
-            return workspace;
-        }
-
-        public void setWorkspace(String workspace) {
-            this.workspace = workspace;
-        }
 
         public String getName() {
             return name;
@@ -159,8 +137,6 @@ public class GeoServerInitProperties {
     }
 
     public static class Datastore {
-        /** 数据源创建到哪个工作区/namespace。 */
-        private String workspace;
         /** GeoServer 数据源名称。 */
         private String name;
         /** GeoServer 页面中展示的数据源描述。 */
@@ -181,14 +157,6 @@ public class GeoServerInitProperties {
         private String dbtype = "postgis";
         /** 数据源创建后是否在 GeoServer 中启用。 */
         private boolean enabled = true;
-
-        public String getWorkspace() {
-            return workspace;
-        }
-
-        public void setWorkspace(String workspace) {
-            this.workspace = workspace;
-        }
 
         public String getName() {
             return name;
@@ -272,10 +240,6 @@ public class GeoServerInitProperties {
     }
 
     public static class Layer {
-        /** 图层发布到哪个工作区。 */
-        private String workspace;
-        /** 图层依赖的数据源名称，该数据源会在初始化前序步骤中创建或确认存在。 */
-        private String datastore;
         /** 发布后的图层名称。SQL View 图层中它也是 virtual table 名称。 */
         private String name;
         /** GeoServer 中展示的标题；为空时使用 name。 */
@@ -286,34 +250,20 @@ public class GeoServerInitProperties {
         private String table;
         /** SQL_VIEW 图层使用的 SQL 资源位置，通常为 classpath:sql/*.sql。 */
         private String sqlLocation;
+        /** 每个图层单独配置的 batchId 默认值。 */
+        private String batchIdDefault;
         /** GeoServer 发布 FeatureType 时声明的 SRS。 */
         private String srs = "EPSG:4326";
         /** GeoServer JDBC virtual table 必需的几何字段元数据。 */
         private Geometry geometry;
-        /** 默认样式名称；不带工作区前缀时会自动归属到图层工作区。 */
+        /** 默认样式名称；不带工作区前缀时会自动归属到根工作区。 */
         private String defaultStyle;
         /** 发布后的 GeoServer 图层是否启用。 */
         private boolean enabled = true;
-        /** 通过 GeoServer viewparams 暴露的 SQL View 参数。 */
+        /** 除 batchId 外，通过 GeoServer viewparams 暴露的 SQL View 参数。 */
         private List<SqlParameter> sqlParameters = new ArrayList<SqlParameter>();
         /** 当前图层可选的 GeoWebCache/WMTS 配置。 */
         private Wmts wmts = new Wmts();
-
-        public String getWorkspace() {
-            return workspace;
-        }
-
-        public void setWorkspace(String workspace) {
-            this.workspace = workspace;
-        }
-
-        public String getDatastore() {
-            return datastore;
-        }
-
-        public void setDatastore(String datastore) {
-            this.datastore = datastore;
-        }
 
         public String getName() {
             return name;
@@ -353,6 +303,14 @@ public class GeoServerInitProperties {
 
         public void setSqlLocation(String sqlLocation) {
             this.sqlLocation = sqlLocation;
+        }
+
+        public String getBatchIdDefault() {
+            return batchIdDefault;
+        }
+
+        public void setBatchIdDefault(String batchIdDefault) {
+            this.batchIdDefault = batchIdDefault;
         }
 
         public String getSrs() {
@@ -473,7 +431,7 @@ public class GeoServerInitProperties {
     public static class Wmts {
         /** GeoServer 图层发布完成后，是否继续创建 GWC 图层配置。 */
         private boolean enabled;
-        /** GWC gridsets，例如 EPSG:4326 或 EPSG:900913。 */
+        /** GWC gridsets，例如 EPSG:3857。 */
         private List<String> gridsets = new ArrayList<String>();
         /** WMTS 暴露的瓦片 MIME 格式。 */
         private List<String> formats = new ArrayList<String>();

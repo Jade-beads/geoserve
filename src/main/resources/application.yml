@@ -8,76 +8,138 @@ geoserver:
   # GeoServerRestClient 使用的 Basic 认证凭据。
   username: ${GEOSERVER_USERNAME:}
   password: ${GEOSERVER_PASSWORD:}
+  # 所有初始化资源统一使用这个工作区。
+  workspace: ${GEOSERVER_WORKSPACE:site_selection}
   init:
     # false 表示只在调用 POST /api/geoserver/init 时执行初始化。
     run-on-startup: ${GEOSERVER_INIT_RUN_ON_STARTUP:false}
 
-  # GeoServerInitService 步骤 1：创建缺失的 workspace/namespace。
-  workspaces:
-    - name: ${GEOSERVER_WORKSPACE:geo_init_demo}
-
+  # 步骤 1：创建缺失的 site_selection workspace。
   # 步骤 2：上传 SLD 文件，创建工作区内样式。
   styles:
-    - workspace: ${GEOSERVER_WORKSPACE:geo_init_demo}
-      name: grid_polygon
-      # GeoServerRestClient 读取该资源，并以 application/vnd.ogc.sld+xml 上传。
-      sld-location: classpath:styles/default-polygon.sld
+    - name: count_style
+      # 人口数量样式，按 total_num 字段渲染。
+      sld-location: classpath:styles/count-style.sld
+    - name: price_style
+      # 价格样式，按 total_num 字段渲染。
+      sld-location: classpath:styles/price-style.sld
 
   # 步骤 3：创建缺失的 GeoServer datastore。GaussDB/openGauss 使用 postgis 兼容方式。
-  datastores:
-    - workspace: ${GEOSERVER_WORKSPACE:geo_init_demo}
-      name: gauss_store
-      description: GaussDB PostGIS-compatible datastore
-      host: ${GAUSS_DB_HOST:localhost}
-      port: ${GAUSS_DB_PORT:5432}
-      database: ${GAUSS_DB_NAME:gisdb}
-      schema: ${GAUSS_DB_SCHEMA:public}
-      username: ${GAUSS_DB_USERNAME:}
-      password: ${GAUSS_DB_PASSWORD:}
-      dbtype: postgis
+  datastore:
+    name: gauss_store
+    description: GaussDB PostGIS-compatible datastore
+    host: ${GAUSS_DB_HOST:localhost}
+    port: ${GAUSS_DB_PORT:5432}
+    database: ${GAUSS_DB_NAME:gisdb}
+    schema: ${GAUSS_DB_SCHEMA:public}
+    username: ${GAUSS_DB_USERNAME:}
+    password: ${GAUSS_DB_PASSWORD:}
+    dbtype: postgis
 
   # 步骤 4：发布缺失的 FeatureType/Layer，并按需配置 GWC/WMTS。
   layers:
-    - workspace: ${GEOSERVER_WORKSPACE:geo_init_demo}
-      datastore: gauss_store
-      name: grid_finance
-      title: Grid Finance
-      # SQL_VIEW 会让 GeoServerRestClient 添加 JDBC_VIRTUAL_TABLE 元数据。
+    - name: basic_all
+      title: 基础全量
       source-type: SQL_VIEW
-      # SQL 中使用 GeoServer %city%、%county%、%type% 占位符。
-      sql-location: classpath:sql/grid_finance.sql
+      sql-location: classpath:sql/basic_all.sql
+      batch-id-default: ${BASIC_ALL_BATCH_ID_DEFAULT:1001}
       srs: EPSG:4326
-      # GeoServer 发布 SQL View 时必须声明 geometry 元数据。
       geometry:
         name: geom_polygon
         type: Polygon
         srid: 4326
-      # 不带工作区前缀的样式名，会自动归属到图层工作区。
-      default-style: grid_polygon
-      # 客户端传 WMS viewparams 时，GeoServer 会使用这些正则做参数校验。
-      sql-parameters:
-        - name: city
-          default-value: "-1"
-          regexp-validator: "^[-|\\w]*$"
-        - name: county
-          default-value: "-1"
-          regexp-validator: "^[-|\\w]*$"
-        - name: type
-          default-value: all
-          regexp-validator: "^[\\w|]*$"
+      default-style: count_style
       wmts:
-        # true 表示 GeoServer 图层存在后继续创建 GeoWebCache 图层。
+        # basic_all 是唯一需要发布 WMTS 的参数化瓦片图层。
         enabled: true
-        # gridsets 和 formats 会成为该缓存图层的 WMTS 能力。
         gridsets:
-          - EPSG:4326
-          - EPSG:900913
+          - EPSG:3857
         formats:
           - image/png
-          - image/jpeg
         parameter-filters:
-          # VIEWPARAMS 参与 GWC 缓存 key，使参数化 SQL View 瓦片可区分缓存。
           - type: regex
             key: VIEWPARAMS
-            default-value: "city:-1;county:-1;type:all"
-            regex: "^city:[0-9-]+;county:[0-9-]+;type:[\\w|]+$"
+            default-value: "batchId:${BASIC_ALL_BATCH_ID_DEFAULT:1001}"
+            regex: "^batchId:[0-9]+$"
+
+    - name: basic
+      title: 基础标签
+      source-type: SQL_VIEW
+      sql-location: classpath:sql/basic.sql
+      batch-id-default: ${BASIC_BATCH_ID_DEFAULT:1001}
+      srs: EPSG:4326
+      geometry:
+        name: geom_polygon
+        type: Polygon
+        srid: 4326
+      default-style: count_style
+      sql-parameters:
+        - name: county
+          default-value: "-1"
+          regexp-validator: "^(-1|[0-9]+)$"
+        - name: ptype
+          default-value: all
+          regexp-validator: "^(all|[A-Za-z0-9_-]+(\\|[A-Za-z0-9_-]+)*)$"
+        - name: age
+          default-value: all
+          regexp-validator: "^(all|[A-Za-z0-9_-]+(\\|[A-Za-z0-9_-]+)*)$"
+        - name: gender
+          default-value: all
+          regexp-validator: "^(all|[A-Za-z0-9_-]+(\\|[A-Za-z0-9_-]+)*)$"
+
+    - name: scene
+      title: 场景标签
+      source-type: SQL_VIEW
+      sql-location: classpath:sql/scene.sql
+      batch-id-default: ${SCENE_BATCH_ID_DEFAULT:1001}
+      srs: EPSG:4326
+      geometry:
+        name: geom_polygon
+        type: Polygon
+        srid: 4326
+      default-style: count_style
+      sql-parameters:
+        - name: county
+          default-value: "-1"
+          regexp-validator: "^(-1|[0-9]+)$"
+        - name: ptype
+          default-value: all
+          regexp-validator: "^(all|[A-Za-z0-9_-]+(\\|[A-Za-z0-9_-]+)*)$"
+
+    - name: finance_app
+      title: 金融 app
+      source-type: SQL_VIEW
+      sql-location: classpath:sql/finance_app.sql
+      batch-id-default: ${FINANCE_APP_BATCH_ID_DEFAULT:1001}
+      srs: EPSG:4326
+      geometry:
+        name: geom_polygon
+        type: Polygon
+        srid: 4326
+      default-style: count_style
+      sql-parameters:
+        - name: county
+          default-value: "-1"
+          regexp-validator: "^(-1|[0-9]+)$"
+        - name: ptype
+          default-value: all
+          regexp-validator: "^(all|[A-Za-z0-9_-]+(\\|[A-Za-z0-9_-]+)*)$"
+
+    - name: land_val
+      title: 房价租金
+      source-type: SQL_VIEW
+      sql-location: classpath:sql/land_val.sql
+      batch-id-default: ${LAND_VAL_BATCH_ID_DEFAULT:1001}
+      srs: EPSG:4326
+      geometry:
+        name: geom_polygon
+        type: Polygon
+        srid: 4326
+      default-style: price_style
+      sql-parameters:
+        - name: county
+          default-value: "-1"
+          regexp-validator: "^(-1|[0-9]+)$"
+        - name: ptype
+          default-value: all
+          regexp-validator: "^(all|[A-Za-z0-9_-]+(\\|[A-Za-z0-9_-]+)*)$"

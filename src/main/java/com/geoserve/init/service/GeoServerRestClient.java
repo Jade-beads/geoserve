@@ -8,7 +8,6 @@ import com.geoserve.init.config.GeoServerInitProperties.ParameterFilter;
 import com.geoserve.init.config.GeoServerInitProperties.SqlParameter;
 import com.geoserve.init.config.GeoServerInitProperties.Style;
 import com.geoserve.init.config.GeoServerInitProperties.Wmts;
-import com.geoserve.init.config.GeoServerInitProperties.Workspace;
 import com.geoserve.init.model.GeoServerStatus;
 import com.geoserve.init.model.ResourceAction;
 import com.geoserve.init.model.SourceType;
@@ -80,8 +79,8 @@ public class GeoServerRestClient {
      * 1. GET /rest/workspaces/{workspace}.json
      * 2. GET 返回 404 时 POST /rest/workspaces
      */
-    public ResourceAction ensureWorkspace(Workspace workspace) {
-        String name = required(workspace.getName(), "workspace.name");
+    public ResourceAction ensureWorkspace() {
+        String name = workspace();
         if (exists("/rest/workspaces/" + name + ".json")) {
             return ResourceAction.skipped("workspace", name, "Workspace already exists");
         }
@@ -101,7 +100,7 @@ public class GeoServerRestClient {
      *    Content-Type 为 application/vnd.ogc.sld+xml。
      */
     public ResourceAction ensureStyle(Style style) {
-        String workspace = required(style.getWorkspace(), "style.workspace");
+        String workspace = workspace();
         String name = required(style.getName(), "style.name");
         String qualifiedName = workspace + ":" + name;
         if (exists("/rest/workspaces/" + workspace + "/styles/" + name + ".json")) {
@@ -123,7 +122,7 @@ public class GeoServerRestClient {
      * {@code connectionParameters.entry}。
      */
     public ResourceAction ensureDatastore(Datastore datastore) {
-        String workspace = required(datastore.getWorkspace(), "datastore.workspace");
+        String workspace = workspace();
         String name = required(datastore.getName(), "datastore.name");
         String qualifiedName = workspace + ":" + name;
         if (exists("/rest/workspaces/" + workspace + "/datastores/" + name + ".json")) {
@@ -144,14 +143,14 @@ public class GeoServerRestClient {
      * 元数据由 classpath SQL 和参数校验器生成。GeoServer 创建 FeatureType 后会自动生成 Layer。
      */
     public ResourceAction ensureFeatureType(Layer layer) {
-        String workspace = required(layer.getWorkspace(), "layer.workspace");
+        String workspace = workspace();
         String name = required(layer.getName(), "layer.name");
         String qualifiedName = workspace + ":" + name;
         if (exists("/rest/layers/" + qualifiedName + ".json")) {
             return ResourceAction.skipped("layer", qualifiedName, "Layer already exists");
         }
 
-        String datastore = required(layer.getDatastore(), "layer.datastore");
+        String datastore = datastoreName();
         // recalculate 要求 GeoServer 在发布时计算 native bbox 和 lat/lon bbox。
         restTemplate.exchange(url("/rest/workspaces/" + workspace + "/datastores/" + datastore
                         + "/featuretypes?recalculate=nativebbox,latlonbbox"),
@@ -177,7 +176,7 @@ public class GeoServerRestClient {
      * 因为它会成为缓存 key 的一部分。
      */
     public ResourceAction ensureGwcLayer(Layer layer) {
-        String workspace = required(layer.getWorkspace(), "layer.workspace");
+        String workspace = workspace();
         String name = required(layer.getName(), "layer.name");
         String qualifiedName = workspace + ":" + name;
         if (layer.getWmts() == null || !layer.getWmts().isEnabled()) {
@@ -238,7 +237,7 @@ public class GeoServerRestClient {
         entries.add(entry("schema", defaultString(datastore.getSchema(), "public")));
         entries.add(entry("user", required(datastore.getUsername(), "datastore.username")));
         entries.add(entry("passwd", required(datastore.getPassword(), "datastore.password")));
-        entries.add(entry("namespace", required(datastore.getWorkspace(), "datastore.workspace")));
+        entries.add(entry("namespace", workspace()));
         // 下面这些参数用于优化 bbox 计算和连接池健康度。
         entries.add(entry("Loose bbox", "true"));
         entries.add(entry("Estimated extends", "true"));
@@ -262,7 +261,7 @@ public class GeoServerRestClient {
         featureType.put("enabled", layer.isEnabled());
         featureType.put("srs", defaultString(layer.getSrs(), "EPSG:4326"));
         featureType.put("projectionPolicy", "FORCE_DECLARED");
-        featureType.put("store", object("name", layer.getWorkspace() + ":" + layer.getDatastore()));
+        featureType.put("store", object("name", workspace() + ":" + datastoreName()));
 
         if (layer.getSourceType() == SourceType.SQL_VIEW) {
             // GeoServer 会把 JDBC virtual table 定义放在 FeatureType metadata 中。
@@ -308,17 +307,30 @@ public class GeoServerRestClient {
      */
     private List<Map<String, Object>> sqlParameters(Layer layer) {
         List<Map<String, Object>> parameters = new ArrayList<Map<String, Object>>();
+        parameters.add(sqlParameter("batchId",
+                required(layer.getBatchIdDefault(), "layer.batchIdDefault"),
+                "^[0-9]+$"));
         if (layer.getSqlParameters() == null) {
             return parameters;
         }
         for (SqlParameter parameter : layer.getSqlParameters()) {
-            Map<String, Object> payload = new LinkedHashMap<String, Object>();
-            payload.put("name", required(parameter.getName(), "sqlParameter.name"));
-            payload.put("defaultValue", required(parameter.getDefaultValue(), "sqlParameter.defaultValue"));
-            payload.put("regexpValidator", required(parameter.getRegexpValidator(), "sqlParameter.regexpValidator"));
-            parameters.add(payload);
+            if ("batchId".equals(parameter.getName())) {
+                continue;
+            }
+            parameters.add(sqlParameter(
+                    required(parameter.getName(), "sqlParameter.name"),
+                    required(parameter.getDefaultValue(), "sqlParameter.defaultValue"),
+                    required(parameter.getRegexpValidator(), "sqlParameter.regexpValidator")));
         }
         return parameters;
+    }
+
+    private Map<String, Object> sqlParameter(String name, String defaultValue, String regexpValidator) {
+        Map<String, Object> payload = new LinkedHashMap<String, Object>();
+        payload.put("name", name);
+        payload.put("defaultValue", defaultValue);
+        payload.put("regexpValidator", regexpValidator);
+        return payload;
     }
 
     /**
@@ -338,7 +350,7 @@ public class GeoServerRestClient {
     private Map<String, Object> layerStylePayload(Layer layer) {
         String styleName = layer.getDefaultStyle();
         if (!styleName.contains(":")) {
-            styleName = layer.getWorkspace() + ":" + styleName;
+            styleName = workspace() + ":" + styleName;
         }
         Map<String, Object> layerPayload = new LinkedHashMap<String, Object>();
         layerPayload.put("defaultStyle", object("name", styleName));
@@ -364,7 +376,7 @@ public class GeoServerRestClient {
         xml.append("<GeoServerLayer>");
         xml.append("<enabled>true</enabled>");
         xml.append("<inMemoryCached>true</inMemoryCached>");
-        xml.append("<name>").append(xml(layer.getWorkspace() + ":" + layer.getName())).append("</name>");
+        xml.append("<name>").append(xml(workspace() + ":" + layer.getName())).append("</name>");
         xml.append("<mimeFormats>");
         for (String format : formats) {
             xml.append("<string>").append(xml(format)).append("</string>");
@@ -507,6 +519,18 @@ public class GeoServerRestClient {
             baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
         }
         return baseUrl + path;
+    }
+
+    private String workspace() {
+        return required(properties.getWorkspace(), "geoserver.workspace");
+    }
+
+    private String datastoreName() {
+        Datastore datastore = properties.getDatastore();
+        if (datastore == null) {
+            throw new IllegalArgumentException("geoserver.datastore is required");
+        }
+        return required(datastore.getName(), "geoserver.datastore.name");
     }
 
     private Map<String, Object> entry(String key, String value) {

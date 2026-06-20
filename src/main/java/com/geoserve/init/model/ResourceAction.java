@@ -4,8 +4,8 @@ package com.geoserve.init.model;
  * 初始化接口返回的单个资源执行结果。
  *
  * name 示例：
- * - workspace: {@code geo_init_demo}
- * - style/datastore/layer/GWC: {@code geo_init_demo:grid_finance}
+ * - workspace: {@code site_selection}
+ * - style/datastore/layer/GWC: {@code site_selection:basic_all}
  */
 public class ResourceAction {
 
