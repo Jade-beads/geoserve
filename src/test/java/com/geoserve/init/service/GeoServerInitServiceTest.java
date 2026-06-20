@@ -17,6 +17,11 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * 只测试初始化编排层。
+ *
+ * 这里 mock GeoServerRestClient，让测试聚焦在资源链路顺序、结果聚合和失败处理上。
+ */
 class GeoServerInitServiceTest {
 
     @Test
@@ -37,6 +42,7 @@ class GeoServerInitServiceTest {
 
         InitResult result = new GeoServerInitService(client, properties).initialize();
 
+        // 顺序与生产链路一致：workspace -> style -> datastore -> layer -> GWC。
         assertThat(result.getActions())
                 .extracting(ResourceAction::getStatus)
                 .containsExactly(ResourceStatus.CREATED, ResourceStatus.SKIPPED,
@@ -60,6 +66,7 @@ class GeoServerInitServiceTest {
 
         InitResult result = new GeoServerInitService(client, properties).initialize();
 
+        // 失败步骤会被记录，但服务仍会继续处理后续配置项。
         assertThat(result.getActions()).hasSize(5);
         assertThat(result.getActions().get(0).getStatus()).isEqualTo(ResourceStatus.FAILED);
         assertThat(result.getActions().get(0).getMessage()).contains("GeoServer rejected workspace");
@@ -67,6 +74,7 @@ class GeoServerInitServiceTest {
     }
 
     private GeoServerInitProperties properties() {
+        // 最小化内存配置，等价于 YAML 中的一组 workspace/style/store/layer。
         Workspace workspace = new Workspace();
         workspace.setName("demo");
 

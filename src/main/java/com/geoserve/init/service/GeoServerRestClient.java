@@ -34,6 +34,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 底层 GeoServer REST/GWC REST 客户端。
+ *
+ * 这个类负责维护与 GeoServer 的 HTTP 契约：
+ * - 先通过 GET 判断资源是否已经存在。
+ * - 只有资源缺失时才执行 POST/PUT。
+ * - payload 构造逻辑集中在这里，方便从 YAML 配置一路追到发送给 GeoServer 的 JSON/XML。
+ */
 @Component
 public class GeoServerRestClient {
 
@@ -49,6 +57,9 @@ public class GeoServerRestClient {
         this.resourceLoader = resourceLoader;
     }
 
+    /**
+     * 读取 GeoServer 版本信息，用于证明 base URL 和 Basic 认证可用。
+     */
     public GeoServerStatus checkStatus() {
         try {
             ResponseEntity<Map> response = restTemplate.exchange(
@@ -62,6 +73,13 @@ public class GeoServerRestClient {
         }
     }
 
+    /**
+     * 确保工作区存在。
+     *
+     * REST 链路：
+     * 1. GET /rest/workspaces/{workspace}.json
+     * 2. GET 返回 404 时 POST /rest/workspaces
+     */
     public ResourceAction ensureWorkspace(Workspace workspace) {
         String name = required(workspace.getName(), "workspace.name");
         if (exists("/rest/workspaces/" + name + ".json")) {
@@ -74,6 +92,14 @@ public class GeoServerRestClient {
         return ResourceAction.created("workspace", name, "Workspace created");
     }
 
+    /**
+     * 通过上传 SLD 文档确保工作区样式存在。
+     *
+     * REST 链路：
+     * 1. GET /rest/workspaces/{workspace}/styles/{style}.json
+     * 2. 样式缺失时 POST /rest/workspaces/{workspace}/styles?name={style}，
+     *    Content-Type 为 application/vnd.ogc.sld+xml。
+     */
     public ResourceAction ensureStyle(Style style) {
         String workspace = required(style.getWorkspace(), "style.workspace");
         String name = required(style.getName(), "style.name");
@@ -90,6 +116,12 @@ public class GeoServerRestClient {
         return ResourceAction.created("style", qualifiedName, "Style created");
     }
 
+    /**
+     * 确保 GaussDB/openGauss 使用的 PostGIS 兼容数据源存在。
+     *
+     * 数据源连接参数在 {@link #datastorePayload(Datastore)} 中组装，结构遵循 GeoServer 需要的
+     * {@code connectionParameters.entry}。
+     */
     public ResourceAction ensureDatastore(Datastore datastore) {
         String workspace = required(datastore.getWorkspace(), "datastore.workspace");
         String name = required(datastore.getName(), "datastore.name");
@@ -105,6 +137,12 @@ public class GeoServerRestClient {
         return ResourceAction.created("datastore", qualifiedName, "Datastore created");
     }
 
+    /**
+     * 确保 FeatureType 已发布成 GeoServer 图层。
+     *
+     * TABLE 图层直接映射物理表。SQL_VIEW 图层会带上 {@code JDBC_VIRTUAL_TABLE} 元数据，
+     * 元数据由 classpath SQL 和参数校验器生成。GeoServer 创建 FeatureType 后会自动生成 Layer。
+     */
     public ResourceAction ensureFeatureType(Layer layer) {
         String workspace = required(layer.getWorkspace(), "layer.workspace");
         String name = required(layer.getName(), "layer.name");
@@ -114,6 +152,7 @@ public class GeoServerRestClient {
         }
 
         String datastore = required(layer.getDatastore(), "layer.datastore");
+        // recalculate 要求 GeoServer 在发布时计算 native bbox 和 lat/lon bbox。
         restTemplate.exchange(url("/rest/workspaces/" + workspace + "/datastores/" + datastore
                         + "/featuretypes?recalculate=nativebbox,latlonbbox"),
                 HttpMethod.POST,
@@ -121,6 +160,7 @@ public class GeoServerRestClient {
                 Void.class);
 
         if (hasText(layer.getDefaultStyle())) {
+            // FeatureType 创建后 Layer 已存在；这里第二次调用用于绑定默认样式。
             restTemplate.exchange(url("/rest/layers/" + qualifiedName),
                     HttpMethod.PUT,
                     new HttpEntity<Map<String, Object>>(layerStylePayload(layer), jsonHeaders()),
@@ -130,6 +170,12 @@ public class GeoServerRestClient {
         return ResourceAction.created("layer", qualifiedName, "Layer created");
     }
 
+    /**
+     * 确保用于 WMTS 瓦片服务的 GeoWebCache 图层存在。
+     *
+     * GWC 需要在 GeoServer Layer 已存在后配置。参数过滤器对动态 SQL View 瓦片很关键，
+     * 因为它会成为缓存 key 的一部分。
+     */
     public ResourceAction ensureGwcLayer(Layer layer) {
         String workspace = required(layer.getWorkspace(), "layer.workspace");
         String name = required(layer.getName(), "layer.name");
@@ -150,6 +196,11 @@ public class GeoServerRestClient {
         return ResourceAction.created("gwc-layer", qualifiedName, "GWC WMTS layer created");
     }
 
+    /**
+     * 所有 ensure* 方法共享的幂等检查。
+     *
+     * 只有 404 表示资源缺失；其他 HTTP 错误都按真实失败继续抛出。
+     */
     private boolean exists(String path) {
         try {
             restTemplate.exchange(url(path), HttpMethod.GET, new HttpEntity<Void>(jsonHeaders()), String.class);
@@ -162,6 +213,9 @@ public class GeoServerRestClient {
         }
     }
 
+    /**
+     * 构造 GeoServer datastore REST API 接受的 JSON body。
+     */
     private Map<String, Object> datastorePayload(Datastore datastore) {
         Map<String, Object> dataStore = new LinkedHashMap<String, Object>();
         dataStore.put("name", required(datastore.getName(), "datastore.name"));
@@ -172,6 +226,9 @@ public class GeoServerRestClient {
         return object("dataStore", dataStore);
     }
 
+    /**
+     * 将 GaussDB/openGauss 配置转换成 GeoServer PostGIS 连接参数 entry。
+     */
     private List<Map<String, Object>> datastoreEntries(Datastore datastore) {
         List<Map<String, Object>> entries = new ArrayList<Map<String, Object>>();
         entries.add(entry("dbtype", defaultString(datastore.getDbtype(), "postgis")));
@@ -182,6 +239,7 @@ public class GeoServerRestClient {
         entries.add(entry("user", required(datastore.getUsername(), "datastore.username")));
         entries.add(entry("passwd", required(datastore.getPassword(), "datastore.password")));
         entries.add(entry("namespace", required(datastore.getWorkspace(), "datastore.workspace")));
+        // 下面这些参数用于优化 bbox 计算和连接池健康度。
         entries.add(entry("Loose bbox", "true"));
         entries.add(entry("Estimated extends", "true"));
         entries.add(entry("validate connections", "true"));
@@ -193,6 +251,9 @@ public class GeoServerRestClient {
         return entries;
     }
 
+    /**
+     * 为物理表或 SQL View 构造 FeatureType payload。
+     */
     private Map<String, Object> featureTypePayload(Layer layer) {
         Map<String, Object> featureType = new LinkedHashMap<String, Object>();
         featureType.put("name", required(layer.getName(), "layer.name"));
@@ -204,12 +265,16 @@ public class GeoServerRestClient {
         featureType.put("store", object("name", layer.getWorkspace() + ":" + layer.getDatastore()));
 
         if (layer.getSourceType() == SourceType.SQL_VIEW) {
+            // GeoServer 会把 JDBC virtual table 定义放在 FeatureType metadata 中。
             featureType.put("metadata", object("entry", jdbcVirtualTableEntry(layer)));
         }
 
         return object("featureType", featureType);
     }
 
+    /**
+     * GeoServer 识别 SQL View/JDBC virtual table 所需的 metadata entry。
+     */
     private Map<String, Object> jdbcVirtualTableEntry(Layer layer) {
         Map<String, Object> entry = new LinkedHashMap<String, Object>();
         entry.put("@key", "JDBC_VIRTUAL_TABLE");
@@ -217,6 +282,12 @@ public class GeoServerRestClient {
         return entry;
     }
 
+    /**
+     * 构造 SQL View 定义。
+     *
+     * SQL 文本从资源文件读取，并使用 GeoServer 的 %param% 占位符。输入校验交给 GeoServer，
+     * 由 YAML 中配置的 regexpValidator 控制。
+     */
     private Map<String, Object> virtualTable(Layer layer) {
         Geometry geometry = layer.getGeometry();
         if (geometry == null) {
@@ -232,6 +303,9 @@ public class GeoServerRestClient {
         return virtualTable;
     }
 
+    /**
+     * 将 SQL View 参数转换成 GeoServer virtual table 参数定义。
+     */
     private List<Map<String, Object>> sqlParameters(Layer layer) {
         List<Map<String, Object>> parameters = new ArrayList<Map<String, Object>>();
         if (layer.getSqlParameters() == null) {
@@ -247,6 +321,9 @@ public class GeoServerRestClient {
         return parameters;
     }
 
+    /**
+     * 声明 SQL View/table 返回的几何字段，供 GeoServer 发布图层。
+     */
     private Map<String, Object> geometryPayload(Geometry geometry) {
         Map<String, Object> payload = new LinkedHashMap<String, Object>();
         payload.put("name", required(geometry.getName(), "geometry.name"));
@@ -255,6 +332,9 @@ public class GeoServerRestClient {
         return payload;
     }
 
+    /**
+     * 构造后续更新 Layer 默认样式的 payload。
+     */
     private Map<String, Object> layerStylePayload(Layer layer) {
         String styleName = layer.getDefaultStyle();
         if (!styleName.contains(":")) {
@@ -266,6 +346,12 @@ public class GeoServerRestClient {
         return object("layer", layerPayload);
     }
 
+    /**
+     * 构造 GeoWebCache GeoServerLayer XML。
+     *
+     * WMTS parameter filters 在这里序列化。对于 SQL View 图层，VIEWPARAMS 应配置为
+     * regexParameterFilter，让不同请求参数生成不同缓存 key，同时仍受正则约束。
+     */
     private String gwcLayerXml(Layer layer) {
         Wmts wmts = layer.getWmts();
         List<String> gridsets = wmts.getGridsets() == null || wmts.getGridsets().isEmpty()
@@ -293,6 +379,7 @@ public class GeoServerRestClient {
         xml.append("<expireCache>0</expireCache>");
         xml.append("<expireClients>0</expireClients>");
         xml.append("<parameterFilters>");
+        // 即使图层使用默认样式，也保留 STYLES 标准参数过滤器。
         xml.append("<styleParameterFilter><key>STYLES</key><defaultValue></defaultValue></styleParameterFilter>");
         appendParameterFilters(xml, wmts.getParameterFilters());
         xml.append("</parameterFilters>");
@@ -301,6 +388,11 @@ public class GeoServerRestClient {
         return xml.toString();
     }
 
+    /**
+     * 序列化配置中的 GWC 参数过滤器。
+     *
+     * type=string 生成白名单过滤器；其他值默认按 regex 处理，这是 VIEWPARAMS 的常用模式。
+     */
     private void appendParameterFilters(StringBuilder xml, List<ParameterFilter> filters) {
         if (filters == null) {
             return;
@@ -326,12 +418,20 @@ public class GeoServerRestClient {
         }
     }
 
+    /**
+     * 写入 stringParameterFilter 和 regexParameterFilter 共有的字段。
+     */
     private void appendFilterCommon(StringBuilder xml, ParameterFilter filter) {
         xml.append("<key>").append(xml(required(filter.getKey(), "wmts.parameterFilter.key"))).append("</key>");
         xml.append("<defaultValue>").append(xml(required(filter.getDefaultValue(), "wmts.parameterFilter.defaultValue")))
                 .append("</defaultValue>");
     }
 
+    /**
+     * 计算 GeoServer 底层 native name。
+     *
+     * SQL View 使用 virtual table 名称；TABLE 图层优先使用 table 配置，未配置时使用 name。
+     */
     private String nativeName(Layer layer) {
         if (layer.getSourceType() == SourceType.SQL_VIEW) {
             return layer.getName();
@@ -339,6 +439,9 @@ public class GeoServerRestClient {
         return hasText(layer.getTable()) ? layer.getTable() : layer.getName();
     }
 
+    /**
+     * 从 classpath 或其他 Spring ResourceLoader 支持的位置读取 SQL/SLD 资源。
+     */
     private String readResource(String location) {
         Resource resource = resourceLoader.getResource(location);
         if (!resource.exists()) {
@@ -351,6 +454,9 @@ public class GeoServerRestClient {
         }
     }
 
+    /**
+     * 从 /rest/about/version 响应 JSON 中提取 GeoServer 版本。
+     */
     private String findVersion(Map body) {
         if (body == null) {
             return null;
@@ -371,6 +477,9 @@ public class GeoServerRestClient {
         return null;
     }
 
+    /**
+     * GeoServer REST 端点使用的 JSON 请求头。
+     */
     private HttpHeaders jsonHeaders() {
         HttpHeaders headers = authHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
@@ -378,6 +487,9 @@ public class GeoServerRestClient {
         return headers;
     }
 
+    /**
+     * 根据脱敏后的运行时配置构造 Basic 认证请求头。
+     */
     private HttpHeaders authHeaders() {
         HttpHeaders headers = new HttpHeaders();
         String userPass = defaultString(properties.getUsername(), "") + ":" + defaultString(properties.getPassword(), "");
@@ -386,6 +498,9 @@ public class GeoServerRestClient {
         return headers;
     }
 
+    /**
+     * 拼接配置中的 base URL 和 GeoServer REST path，避免出现重复斜杠。
+     */
     private String url(String path) {
         String baseUrl = required(properties.getBaseUrl(), "geoserver.baseUrl");
         while (baseUrl.endsWith("/")) {

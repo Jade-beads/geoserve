@@ -35,6 +35,11 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+/**
+ * 不连接真实 GeoServer，测试 GeoServer HTTP 契约。
+ *
+ * MockRestServiceServer 会验证 GeoServerRestClient 生成的 REST 路径、方法、请求头和关键 payload 片段。
+ */
 class GeoServerRestClientTest {
 
     private GeoServerRestClient client;
@@ -42,6 +47,7 @@ class GeoServerRestClientTest {
 
     @BeforeEach
     void setUp() {
+        // 测试凭据使用虚构值，避免仓库历史中出现真实密钥。
         RestTemplate restTemplate = new RestTemplate();
         GeoServerInitProperties properties = new GeoServerInitProperties();
         properties.setBaseUrl("http://geoserver.local/geoserver");
@@ -57,6 +63,7 @@ class GeoServerRestClientTest {
         Workspace workspace = new Workspace();
         workspace.setName("demo");
 
+        // 已存在资源返回 200，因此不应继续发送 POST。
         server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces/demo.json"))
                 .andExpect(method(HttpMethod.GET))
                 .andExpect(header(HttpHeaders.AUTHORIZATION, basicAuth()))
@@ -74,6 +81,7 @@ class GeoServerRestClientTest {
         Workspace workspace = new Workspace();
         workspace.setName("demo");
 
+        // 404 触发工作区的幂等创建路径。
         server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces/demo.json"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withStatus(HttpStatus.NOT_FOUND));
@@ -95,6 +103,7 @@ class GeoServerRestClientTest {
         style.setName("grid_polygon");
         style.setSldLocation("classpath:styles/test-polygon.sld");
 
+        // 样式缺失时，客户端会读取 classpath SLD 并上传到工作区。
         server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces/demo/styles/grid_polygon.json"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withStatus(HttpStatus.NOT_FOUND));
@@ -114,6 +123,7 @@ class GeoServerRestClientTest {
     void ensureDatastoreCreatesPostgisCompatibleGaussDbStoreWhenMissing() {
         Datastore datastore = datastore();
 
+        // 数据源 payload 必须使用 GeoServer PostGIS entry 结构，以兼容 GaussDB/openGauss。
         server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces/demo/datastores/gauss_store.json"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withStatus(HttpStatus.NOT_FOUND));
@@ -137,6 +147,7 @@ class GeoServerRestClientTest {
     void ensureSqlViewLayerCreatesVirtualTableAndSetsDefaultStyleWhenLayerIsMissing() {
         Layer layer = sqlViewLayer();
 
+        // 图层创建会发送 JDBC_VIRTUAL_TABLE 元数据，之后再用第二个 PUT 绑定默认样式。
         server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/layers/demo:grid_finance.json"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withStatus(HttpStatus.NOT_FOUND));
@@ -163,6 +174,7 @@ class GeoServerRestClientTest {
     void ensureGwcLayerCreatesRegexViewparamsFilterWhenTileLayerIsMissing() {
         Layer layer = sqlViewLayer();
 
+        // GWC 图层 XML 必须包含 VIEWPARAMS，让参数化 WMTS 请求生成独立缓存 key。
         server.expect(once(), requestTo("http://geoserver.local/geoserver/gwc/rest/layers/demo:grid_finance.xml"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withStatus(HttpStatus.NOT_FOUND));
@@ -184,6 +196,7 @@ class GeoServerRestClientTest {
     }
 
     private Datastore datastore() {
+        // 测试数据源模拟脱敏后的 GaussDB/openGauss PostGIS 兼容配置。
         Datastore datastore = new Datastore();
         datastore.setWorkspace("demo");
         datastore.setName("gauss_store");
@@ -199,6 +212,7 @@ class GeoServerRestClientTest {
     }
 
     private Layer sqlViewLayer() {
+        // 测试图层模拟生产 SQL View 链路：geometry + parameters + WMTS filter。
         Geometry geometry = new Geometry();
         geometry.setName("geom_polygon");
         geometry.setType("Polygon");

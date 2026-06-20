@@ -19,6 +19,20 @@
 
 `POST /api/geoserver/init` 会返回每个资源的执行结果，状态包括 `CREATED`、`SKIPPED` 或 `FAILED`。
 
+## 代码链路
+
+初始化主链路如下：
+
+1. `GeoServerController` 接收 `/api/geoserver/status` 和 `/api/geoserver/init` 请求。
+2. `GeoServerInitService` 按 workspace、style、datastore、layer、GWC/WMTS 的顺序编排初始化步骤。
+3. `GeoServerRestClient` 负责每一步真实的 GeoServer REST/GWC REST 请求，并保持“先查，缺失再创建”的幂等策略。
+4. `GeoServerInitProperties` 绑定 `application.yml` 和环境变量，作为所有资源名称、数据库参数、SQL View 参数、WMTS 参数过滤器的配置来源。
+5. `src/main/resources/sql/*.sql` 保存 SQL View 内容，`src/main/resources/styles/*.sld` 保存 GeoServer 样式内容。
+
+如果需要从接口调用反查代码，可以按这个路径阅读：
+
+`Controller -> InitService -> RestClient.ensure* -> RestClient payload builder -> application.yml/sql/sld`
+
 ## 运行
 
 ```bash

@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- GeoServerRestClientTest 中模拟样式缺失时上传的测试 SLD。 -->
 <sld:StyledLayerDescriptor xmlns:sld="http://www.opengis.net/sld"
                            xmlns:ogc="http://www.opengis.net/ogc"
                            xmlns:xlink="http://www.w3.org/1999/xlink"

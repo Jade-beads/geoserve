@@ -1,3 +1,5 @@
+-- GeoServerRestClientTest 加载的测试 SQL 资源。
+-- 保持与生产 SQL View 相同的 %param% 占位符模式。
 SELECT
   grid_id,
   geom_polygon,

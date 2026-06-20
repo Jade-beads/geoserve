@@ -1,10 +1,21 @@
 package com.geoserve.init.model;
 
+/**
+ * 初始化接口返回的单个资源执行结果。
+ *
+ * name 示例：
+ * - workspace: {@code geo_init_demo}
+ * - style/datastore/layer/GWC: {@code geo_init_demo:grid_finance}
+ */
 public class ResourceAction {
 
+    /** 资源类型，例如 workspace、style、datastore、layer 或 gwc-layer。 */
     private String type;
+    /** 资源名称；工作区内资源使用 workspace:name 格式。 */
     private String name;
+    /** 当前步骤的 CREATED、SKIPPED 或 FAILED 状态。 */
     private ResourceStatus status;
+    /** 给 API 调用方和日志阅读的说明信息。 */
     private String message;
 
     public ResourceAction() {
@@ -17,14 +28,17 @@ public class ResourceAction {
         this.message = message;
     }
 
+    /** 本次执行中新创建资源的工厂方法。 */
     public static ResourceAction created(String type, String name, String message) {
         return new ResourceAction(type, name, ResourceStatus.CREATED, message);
     }
 
+    /** 资源已存在且按幂等策略保持不变的工厂方法。 */
     public static ResourceAction skipped(String type, String name, String message) {
         return new ResourceAction(type, name, ResourceStatus.SKIPPED, message);
     }
 
+    /** 检查或创建失败时的工厂方法。 */
     public static ResourceAction failed(String type, String name, String message) {
         return new ResourceAction(type, name, ResourceStatus.FAILED, message);
     }

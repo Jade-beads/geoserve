@@ -1,21 +1,29 @@
 server:
+  # 当前初始化服务的本地端口，不是 GeoServer 端口。
   port: 8081
 
 geoserver:
+  # GeoServer 根地址。代码会在该地址后拼接 /rest/* 和 /gwc/rest/*。
   base-url: ${GEOSERVER_BASE_URL:http://localhost:8080/geoserver}
+  # GeoServerRestClient 使用的 Basic 认证凭据。
   username: ${GEOSERVER_USERNAME:}
   password: ${GEOSERVER_PASSWORD:}
   init:
+    # false 表示只在调用 POST /api/geoserver/init 时执行初始化。
     run-on-startup: ${GEOSERVER_INIT_RUN_ON_STARTUP:false}
 
+  # GeoServerInitService 步骤 1：创建缺失的 workspace/namespace。
   workspaces:
     - name: ${GEOSERVER_WORKSPACE:geo_init_demo}
 
+  # 步骤 2：上传 SLD 文件，创建工作区内样式。
   styles:
     - workspace: ${GEOSERVER_WORKSPACE:geo_init_demo}
       name: grid_polygon
+      # GeoServerRestClient 读取该资源，并以 application/vnd.ogc.sld+xml 上传。
       sld-location: classpath:styles/default-polygon.sld
 
+  # 步骤 3：创建缺失的 GeoServer datastore。GaussDB/openGauss 使用 postgis 兼容方式。
   datastores:
     - workspace: ${GEOSERVER_WORKSPACE:geo_init_demo}
       name: gauss_store
@@ -28,19 +36,25 @@ geoserver:
       password: ${GAUSS_DB_PASSWORD:}
       dbtype: postgis
 
+  # 步骤 4：发布缺失的 FeatureType/Layer，并按需配置 GWC/WMTS。
   layers:
     - workspace: ${GEOSERVER_WORKSPACE:geo_init_demo}
       datastore: gauss_store
       name: grid_finance
       title: Grid Finance
+      # SQL_VIEW 会让 GeoServerRestClient 添加 JDBC_VIRTUAL_TABLE 元数据。
       source-type: SQL_VIEW
+      # SQL 中使用 GeoServer %city%、%county%、%type% 占位符。
       sql-location: classpath:sql/grid_finance.sql
       srs: EPSG:4326
+      # GeoServer 发布 SQL View 时必须声明 geometry 元数据。
       geometry:
         name: geom_polygon
         type: Polygon
         srid: 4326
+      # 不带工作区前缀的样式名，会自动归属到图层工作区。
       default-style: grid_polygon
+      # 客户端传 WMS viewparams 时，GeoServer 会使用这些正则做参数校验。
       sql-parameters:
         - name: city
           default-value: "-1"
@@ -52,7 +66,9 @@ geoserver:
           default-value: all
           regexp-validator: "^[\\w|]*$"
       wmts:
+        # true 表示 GeoServer 图层存在后继续创建 GeoWebCache 图层。
         enabled: true
+        # gridsets 和 formats 会成为该缓存图层的 WMTS 能力。
         gridsets:
           - EPSG:4326
           - EPSG:900913
@@ -60,6 +76,7 @@ geoserver:
           - image/png
           - image/jpeg
         parameter-filters:
+          # VIEWPARAMS 参与 GWC 缓存 key，使参数化 SQL View 瓦片可区分缓存。
           - type: regex
             key: VIEWPARAMS
             default-value: "city:-1;county:-1;type:all"

@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  GeoServerRestClient.ensureStyle 上传的默认面样式。
+  application.yml 通过 classpath:styles/default-polygon.sld 指向该文件；
+  发布后的图层可以通过 default-style 引用对应的工作区样式。
+-->
 <sld:StyledLayerDescriptor xmlns:sld="http://www.opengis.net/sld"
                            xmlns:ogc="http://www.opengis.net/ogc"
                            xmlns:xlink="http://www.w3.org/1999/xlink"
