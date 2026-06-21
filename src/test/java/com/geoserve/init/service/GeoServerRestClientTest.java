@@ -14,17 +14,22 @@ import com.geoserve.init.model.SourceType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.DefaultResourceLoader;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.client.RestClientException;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.client.ExpectedCount.never;
 import static org.springframework.test.web.client.ExpectedCount.once;
@@ -170,6 +175,43 @@ class GeoServerRestClientTest {
         ResourceAction action = client.ensureFeatureType(layer);
 
         assertThat(action.getStatus()).isEqualTo(ResourceStatus.CREATED);
+        server.verify();
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void ensureSqlViewLayerLogsDiagnosticContextWhenGeoServerRejectsFeatureType(CapturedOutput output) {
+        Layer layer = sqlViewLayer("basic", false);
+        layer.setDefaultStyle("count_style");
+        layer.setSqlLocation("classpath:sql/basic.sql");
+
+        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/layers/site_selection:basic.json"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces/site_selection/datastores/gauss_store/featuretypes?recalculate=nativebbox,latlonbbox"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .contentType(MediaType.TEXT_PLAIN)
+                        .body("Error occurred building feature type"));
+
+        assertThatThrownBy(new org.assertj.core.api.ThrowableAssert.ThrowingCallable() {
+            @Override
+            public void call() {
+                client.ensureFeatureType(layer);
+            }
+        }).isInstanceOf(RestClientException.class);
+
+        String logs = output.getOut() + output.getErr();
+        assertThat(logs).contains("GeoServer feature type create failed");
+        assertThat(logs).contains("layer=site_selection:basic");
+        assertThat(logs).contains("datastore=site_selection:gauss_store");
+        assertThat(logs).contains("/rest/workspaces/site_selection/datastores/gauss_store/featuretypes");
+        assertThat(logs).contains("sqlLocation=classpath:sql/basic.sql");
+        assertThat(logs).contains("FROM tb_grid_filter_num_total");
+        assertThat(logs).contains("geometry=geom_polygon/Polygon/4326");
+        assertThat(logs).contains("params=batchId=1001");
+        assertThat(logs).contains("county=-1");
+        assertThat(logs).contains("Error occurred building feature type");
         server.verify();
     }
 

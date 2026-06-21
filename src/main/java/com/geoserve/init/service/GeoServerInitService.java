@@ -6,6 +6,8 @@ import com.geoserve.init.config.GeoServerInitProperties.Layer;
 import com.geoserve.init.config.GeoServerInitProperties.Style;
 import com.geoserve.init.model.InitResult;
 import com.geoserve.init.model.ResourceAction;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
@@ -22,6 +24,8 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class GeoServerInitService {
+
+    private static final Logger log = LoggerFactory.getLogger(GeoServerInitService.class);
 
     private final GeoServerRestClient client;
     private final GeoServerInitProperties properties;
@@ -98,13 +102,18 @@ public class GeoServerInitService {
      * 比尝试回滚更安全。
      */
     private ResourceAction run(String type, String name, ActionCallback callback) {
+        log.info("GeoServer init step start type={} name={}", type, name);
         try {
             ResourceAction action = callback.run();
             if (action == null) {
+                log.warn("GeoServer init step returned null type={} name={}", type, name);
                 return ResourceAction.failed(type, name, "No action returned");
             }
+            log.info("GeoServer init step finished type={} name={} status={} message={}",
+                    type, name, action.getStatus(), action.getMessage());
             return action;
         } catch (RuntimeException ex) {
+            log.error("GeoServer init step failed type={} name={} message={}", type, name, ex.getMessage(), ex);
             return ResourceAction.failed(type, name, ex.getMessage());
         }
     }

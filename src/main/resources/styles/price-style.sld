@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  price_style：价格样式。
-  land_val 默认使用该样式，渲染字段同样是 SQL View 返回的 total_num。
+  价格样式。
+  房价租金图层默认使用该样式，渲染字段使用统计数量字段。
 -->
 <sld:StyledLayerDescriptor xmlns:sld="http://www.opengis.net/sld"
                            xmlns:ogc="http://www.opengis.net/ogc"
@@ -9,12 +9,12 @@
                            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                            version="1.0.0">
     <sld:NamedLayer>
-        <sld:Name>price_style</sld:Name>
+        <sld:Name>价格样式</sld:Name>
         <sld:UserStyle>
             <sld:Title>价格样式</sld:Title>
             <sld:FeatureTypeStyle>
                 <sld:Rule>
-                    <sld:Name>high</sld:Name>
+                    <sld:Name>高值</sld:Name>
                     <ogc:Filter>
                         <ogc:PropertyIsGreaterThanOrEqualTo>
                             <ogc:PropertyName>total_num</ogc:PropertyName>
@@ -33,7 +33,7 @@
                     </sld:PolygonSymbolizer>
                 </sld:Rule>
                 <sld:Rule>
-                    <sld:Name>medium</sld:Name>
+                    <sld:Name>中值</sld:Name>
                     <ogc:Filter>
                         <ogc:And>
                             <ogc:PropertyIsGreaterThanOrEqualTo>
@@ -58,7 +58,7 @@
                     </sld:PolygonSymbolizer>
                 </sld:Rule>
                 <sld:Rule>
-                    <sld:Name>low</sld:Name>
+                    <sld:Name>低值</sld:Name>
                     <sld:PolygonSymbolizer>
                         <sld:Fill>
                             <sld:CssParameter name="fill">#FEE8C8</sld:CssParameter>

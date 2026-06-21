@@ -24,6 +24,9 @@ import org.springframework.util.StreamUtils;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.client.HttpStatusCodeException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -43,6 +46,8 @@ import java.util.Map;
  */
 @Component
 public class GeoServerRestClient {
+
+    private static final Logger log = LoggerFactory.getLogger(GeoServerRestClient.class);
 
     private final RestTemplate restTemplate;
     private final GeoServerInitProperties properties;
@@ -151,12 +156,36 @@ public class GeoServerRestClient {
         }
 
         String datastore = datastoreName();
+        String createPath = "/rest/workspaces/" + workspace + "/datastores/" + datastore
+                + "/featuretypes?recalculate=nativebbox,latlonbbox";
+        Map<String, Object> payload = featureTypePayload(layer);
+        log.info("GeoServer feature type create start layer={} datastore={} url={} sourceType={} sqlLocation={} geometry={} params={}",
+                qualifiedName,
+                workspace + ":" + datastore,
+                createPath,
+                layer.getSourceType(),
+                defaultString(layer.getSqlLocation(), ""),
+                geometryForLog(layer),
+                paramsForLog(layer));
         // recalculate 要求 GeoServer 在发布时计算 native bbox 和 lat/lon bbox。
-        restTemplate.exchange(url("/rest/workspaces/" + workspace + "/datastores/" + datastore
-                        + "/featuretypes?recalculate=nativebbox,latlonbbox"),
-                HttpMethod.POST,
-                new HttpEntity<Map<String, Object>>(featureTypePayload(layer), jsonHeaders()),
-                Void.class);
+        try {
+            restTemplate.exchange(url(createPath),
+                    HttpMethod.POST,
+                    new HttpEntity<Map<String, Object>>(payload, jsonHeaders()),
+                    Void.class);
+        } catch (RestClientException ex) {
+            log.error("GeoServer feature type create failed layer={} datastore={} url={} sqlLocation={} geometry={} params={} sql={} response={}",
+                    qualifiedName,
+                    workspace + ":" + datastore,
+                    createPath,
+                    defaultString(layer.getSqlLocation(), ""),
+                    geometryForLog(layer),
+                    paramsForLog(layer),
+                    compactSql(sqlForLog(layer)),
+                    responseForLog(ex),
+                    ex);
+            throw ex;
+        }
 
         if (hasText(layer.getDefaultStyle())) {
             // FeatureType 创建后 Layer 已存在；这里第二次调用用于绑定默认样式。
@@ -167,6 +196,51 @@ public class GeoServerRestClient {
         }
 
         return ResourceAction.created("layer", qualifiedName, "Layer created");
+    }
+
+    private String sqlForLog(Layer layer) {
+        if (layer.getSourceType() != SourceType.SQL_VIEW || !hasText(layer.getSqlLocation())) {
+            return "";
+        }
+        return readResource(layer.getSqlLocation());
+    }
+
+    private String compactSql(String sql) {
+        if (sql == null) {
+            return "";
+        }
+        String compact = sql.replace('\r', ' ').replace('\n', ' ').replaceAll("\\s+", " ").trim();
+        return compact.length() <= 1000 ? compact : compact.substring(0, 1000) + "...";
+    }
+
+    private String geometryForLog(Layer layer) {
+        Geometry geometry = layer.getGeometry();
+        if (geometry == null) {
+            return "";
+        }
+        return defaultString(geometry.getName(), "") + "/"
+                + defaultString(geometry.getType(), "") + "/"
+                + geometry.getSrid();
+    }
+
+    private String paramsForLog(Layer layer) {
+        List<Map<String, Object>> params = sqlParameters(layer);
+        List<String> items = new ArrayList<String>();
+        for (Map<String, Object> param : params) {
+            items.add(String.valueOf(param.get("name")) + "="
+                    + String.valueOf(param.get("defaultValue"))
+                    + " regex=" + String.valueOf(param.get("regexpValidator")));
+        }
+        return join(items, ", ");
+    }
+
+    private String responseForLog(RestClientException ex) {
+        if (ex instanceof HttpStatusCodeException) {
+            HttpStatusCodeException httpEx = (HttpStatusCodeException) ex;
+            return "status=" + httpEx.getStatusCode()
+                    + " body=" + defaultString(httpEx.getResponseBodyAsString(), "");
+        }
+        return defaultString(ex.getMessage(), ex.getClass().getName());
     }
 
     /**
@@ -565,6 +639,17 @@ public class GeoServerRestClient {
 
     private String defaultString(String value, String fallback) {
         return hasText(value) ? value : fallback;
+    }
+
+    private String join(List<String> items, String delimiter) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < items.size(); i++) {
+            if (i > 0) {
+                builder.append(delimiter);
+            }
+            builder.append(items.get(i));
+        }
+        return builder.toString();
     }
 
     private String xml(String value) {

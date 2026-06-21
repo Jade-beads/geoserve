@@ -6,4 +6,4 @@ SELECT
   COALESCE(%ptype%, 0) AS total_num
 FROM tb_grid_land_value_total
 WHERE batch_id = CAST('%batchId%' AS BIGINT)
-  AND ('%county%' = '-1' OR code_coun = CAST('%county%' AS INTEGER))
+  AND ('%county%' = '-1' OR code_coun::text = '%county%')

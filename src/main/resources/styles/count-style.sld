@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  count_style：人口数量样式。
-  GeoServerRestClient.ensureStyle 上传该 SLD 后，basic/basic_all/scene/finance_app 可作为默认样式引用。
-  渲染字段统一使用 SQL View 返回的 total_num。
+  人口数量样式。
+  上传后可作为人口相关图层的默认样式引用。
+  渲染字段使用统计数量字段。
 -->
 <sld:StyledLayerDescriptor xmlns:sld="http://www.opengis.net/sld"
                            xmlns:ogc="http://www.opengis.net/ogc"
@@ -10,12 +10,12 @@
                            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                            version="1.0.0">
     <sld:NamedLayer>
-        <sld:Name>count_style</sld:Name>
+        <sld:Name>人口数量样式</sld:Name>
         <sld:UserStyle>
             <sld:Title>人口数量样式</sld:Title>
             <sld:FeatureTypeStyle>
                 <sld:Rule>
-                    <sld:Name>high</sld:Name>
+                    <sld:Name>高值</sld:Name>
                     <ogc:Filter>
                         <ogc:PropertyIsGreaterThanOrEqualTo>
                             <ogc:PropertyName>total_num</ogc:PropertyName>
@@ -34,7 +34,7 @@
                     </sld:PolygonSymbolizer>
                 </sld:Rule>
                 <sld:Rule>
-                    <sld:Name>medium</sld:Name>
+                    <sld:Name>中值</sld:Name>
                     <ogc:Filter>
                         <ogc:And>
                             <ogc:PropertyIsGreaterThanOrEqualTo>
@@ -59,7 +59,7 @@
                     </sld:PolygonSymbolizer>
                 </sld:Rule>
                 <sld:Rule>
-                    <sld:Name>low</sld:Name>
+                    <sld:Name>低值</sld:Name>
                     <sld:PolygonSymbolizer>
                         <sld:Fill>
                             <sld:CssParameter name="fill">#D9F0A3</sld:CssParameter>

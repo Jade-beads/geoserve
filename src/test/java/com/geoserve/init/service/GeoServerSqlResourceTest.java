@@ -48,7 +48,7 @@ class GeoServerSqlResourceTest {
 
         assertThat(sql).contains("FROM tb_grid_filter_num_total");
         assertThat(sql).contains("SUM(COALESCE(num, 0)) AS total_num");
-        assertThat(sql).contains("code_coun = CAST('%county%' AS INTEGER)");
+        assertThat(sql).contains("code_coun::text = '%county%'");
         assertThat(sql).contains("population_type = ANY (string_to_array('%ptype%', '|'))");
         assertThat(sql).contains("age_type = ANY (string_to_array('%age%', '|'))");
         assertThat(sql).contains("gende = ANY (string_to_array('%gender%', '|'))");
@@ -73,6 +73,27 @@ class GeoServerSqlResourceTest {
         assertThat(yaml).contains("debit_card_bc|debit_card_abc|debit_card_icbc");
         assertThat(yaml).contains("default-value: average_rent");
         assertThat(yaml).contains("average_rent|average_house_price");
+    }
+
+    @Test
+    void sldDisplayTextUsesChineseNames() throws Exception {
+        String countSld = read("styles/count-style.sld");
+        String priceSld = read("styles/price-style.sld");
+
+        assertThat(countSld).contains("<sld:Name>人口数量样式</sld:Name>");
+        assertThat(priceSld).contains("<sld:Name>价格样式</sld:Name>");
+        assertThat(countSld).contains("<sld:Name>高值</sld:Name>");
+        assertThat(countSld).contains("<sld:Name>中值</sld:Name>");
+        assertThat(countSld).contains("<sld:Name>低值</sld:Name>");
+        assertThat(priceSld).contains("<sld:Name>高值</sld:Name>");
+        assertThat(priceSld).contains("<sld:Name>中值</sld:Name>");
+        assertThat(priceSld).contains("<sld:Name>低值</sld:Name>");
+        assertThat(countSld).doesNotContain("<sld:Name>high</sld:Name>");
+        assertThat(countSld).doesNotContain("<sld:Name>medium</sld:Name>");
+        assertThat(countSld).doesNotContain("<sld:Name>low</sld:Name>");
+        assertThat(priceSld).doesNotContain("<sld:Name>high</sld:Name>");
+        assertThat(priceSld).doesNotContain("<sld:Name>medium</sld:Name>");
+        assertThat(priceSld).doesNotContain("<sld:Name>low</sld:Name>");
     }
 
     @Test
@@ -132,7 +153,7 @@ class GeoServerSqlResourceTest {
 
         assertThat(sql).contains("FROM " + tableName);
         assertThat(sql).contains("COALESCE(%ptype%, 0) AS total_num");
-        assertThat(sql).contains("code_coun = CAST('%county%' AS INTEGER)");
+        assertThat(sql).contains("code_coun::text = '%county%'");
     }
 
     private String read(String resource) throws Exception {
