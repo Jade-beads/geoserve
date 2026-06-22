@@ -143,7 +143,8 @@ class GeoServerSqlResourceTest {
         assertThat(gitignore).contains(".env.local-postgres");
         assertThat(example).contains("LOCAL_GEOSERVER_BASE_URL=");
         assertThat(example).contains("LOCAL_BASIC_BATCH_ID_DEFAULT=\"202511310100\"");
-        assertThat(example).doesNotContain("192.168." + "100.116");
+        String sensitiveIp = String.join(".", "192", "168", "100", "116");
+        assertThat(example).doesNotContain(sensitiveIp);
         assertThat(example).doesNotContain("postgres:" + "postgres");
         assertThat(example).doesNotContain("geoserver");
     }
@@ -170,6 +171,16 @@ class GeoServerSqlResourceTest {
         assertThat(gitignore).contains("src/main/resources/geoserver/*.zip");
         assertThat(readFile("src/main/resources/geoserver/.gitkeep"))
                 .contains("本目录用于本地放置 GeoServer ZIP 包");
+    }
+
+    @Test
+    void readmeExplainsSharedTileCacheConfigurationBeforeStartup() throws Exception {
+        String readme = readFile("README.md");
+
+        assertThat(readme).contains("GEOSERVER_DEPLOY_CACHE_DIR=/mnt/share/geowebcache/site-selection");
+        assertThat(readme).contains("启动脚本执行前注入到 `GEOWEBCACHE_CACHE_DIR`");
+        assertThat(readme).contains("需要在项目启动前配置");
+        assertThat(readme).contains("不能放到 `GEOSERVER_DEPLOY_INSTALL_DIR` 里面");
     }
 
     private void assertDynamicColumnSql(String resource, String tableName) throws Exception {

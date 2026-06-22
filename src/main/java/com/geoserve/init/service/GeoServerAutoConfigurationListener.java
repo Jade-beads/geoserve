@@ -5,16 +5,21 @@ import com.geoserve.init.config.GeoServerInitProperties.Deploy;
 import com.geoserve.init.model.GeoServerStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.ApplicationEvent;
+import org.springframework.context.ApplicationListener;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.context.event.ContextClosedEvent;
-import org.springframework.context.event.EventListener;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
-import org.springframework.stereotype.Component;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
@@ -26,135 +31,159 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 /**
- * 本机托管 GeoServer 的生命周期组件。
+ * 监听 Spring Boot 启停事件，在本机解压、启动、停止 GeoServer。
  *
- * 启动链路：
- * 1. 从 resources/file 读取 GeoServer ZIP 包。
- * 2. 解压到 install-dir。
- * 3. 设置 data/cache/log 等持久目录环境变量。
- * 4. 启动 GeoServer 子进程并等待 REST 版本接口可用。
- * 5. 如开启 run-on-startup，再执行现有初始化服务。
- *
- * 停止链路只删除 install-dir，不删除 data-dir、cache-dir、log-dir。
+ * 该类按 AutoConfigurationListener 示例保留单类监听器形态：
+ * 通过 {@link #onApplicationEvent(ApplicationEvent)} 分发启动和关闭事件。
  */
-@Component
-public class GeoServerDeploymentLifecycle {
+@Configuration("geoServerAutoConfigurationListener")
+public class GeoServerAutoConfigurationListener implements ApplicationListener<ApplicationEvent> {
 
-    private static final Logger log = LoggerFactory.getLogger(GeoServerDeploymentLifecycle.class);
+    private static final Logger log = LoggerFactory.getLogger(GeoServerAutoConfigurationListener.class);
 
-    private final GeoServerInitProperties properties;
-    private final GeoServerRestClient restClient;
-    private final GeoServerInitService initService;
-    private final GeoServerProcessLauncher processLauncher;
-    private final ResourceLoader resourceLoader;
-    private final Sleeper sleeper;
+    Process process = null;
 
-    private Process process;
+    @Autowired
+    ResourceLoader resourceLoader;
+
+    @Autowired
+    private GeoServerInitProperties properties;
+
+    @Autowired
+    private GeoServerRestClient restClient;
+
+    @Autowired
+    private GeoServerInitService initService;
+
     private File installDirectory;
     private File geoserverHome;
-    private GeoServerProcessCommand shutdownCommand;
+    private File shutdownScript;
+    private long sleepMillis = 1000L;
 
-    public GeoServerDeploymentLifecycle(GeoServerInitProperties properties,
-                                        GeoServerRestClient restClient,
-                                        GeoServerInitService initService,
-                                        GeoServerProcessLauncher processLauncher,
-                                        ResourceLoader resourceLoader) {
-        this(properties, restClient, initService, processLauncher, resourceLoader, new ThreadSleeper());
+    public GeoServerAutoConfigurationListener() {
+        log.info("load-geoserver-managed-deploy:[geoserver-managed-deploy]");
     }
 
-    GeoServerDeploymentLifecycle(GeoServerInitProperties properties,
-                                 GeoServerRestClient restClient,
-                                 GeoServerInitService initService,
-                                 GeoServerProcessLauncher processLauncher,
-                                 ResourceLoader resourceLoader,
-                                 Sleeper sleeper) {
-        this.properties = properties;
-        this.restClient = restClient;
-        this.initService = initService;
-        this.processLauncher = processLauncher;
-        this.resourceLoader = resourceLoader;
-        this.sleeper = sleeper;
-    }
-
-    @EventListener(ApplicationReadyEvent.class)
-    public synchronized void onApplicationReady() {
-        startManagedGeoServerAndInitializeIfNeeded();
-    }
-
-    @EventListener(ContextClosedEvent.class)
-    public synchronized void onContextClosed() {
-        shutdownManagedGeoServer();
-    }
-
-    public synchronized void startManagedGeoServerAndInitializeIfNeeded() {
+    @Override
+    public void onApplicationEvent(ApplicationEvent event) {
         Deploy deploy = deploy();
         if (!deploy.isEnabled()) {
-            log.info("GeoServer managed deployment disabled");
-            return;
-        }
-        if (process != null) {
-            log.info("GeoServer managed process already started node={}", nodeName(deploy));
             return;
         }
 
+        if (event instanceof ContextClosedEvent) {
+            synchronized (this) {
+                stopGeoServerSh(false);
+            }
+        }
+
+        if (event instanceof ApplicationReadyEvent) {
+            synchronized (this) {
+                startGeoServerSh();
+            }
+        }
+    }
+
+    private void startGeoServerSh() {
+        Deploy deploy = deploy();
         try {
+            if (isGeoServerRunning()) {
+                log.warn("GeoServer is already running, stop it before managed restart node={}", nodeName(deploy));
+                stopGeoServerSh(true);
+            }
+
             PreparedDeployment prepared = prepareDeployment(deploy);
             this.installDirectory = prepared.installDirectory;
             this.geoserverHome = prepared.geoserverHome;
-            this.shutdownCommand = prepared.shutdownCommand;
-            this.process = processLauncher.start(prepared.startupCommand);
-            log.info("GeoServer managed process started node={} home={} dataDir={} cacheDir={} logLocation={}",
+            this.shutdownScript = prepared.shutdownScript;
+
+            chmodExecutable(prepared.startupScript, prepared.environment, prepared.geoserverHome);
+            String startupScriptPath = prepared.startupScript.getAbsolutePath();
+            String[] cmdArr = {"sh", "-c", startupScriptPath};
+            process = Runtime.getRuntime().exec(cmdArr, envArray(prepared.environment), prepared.geoserverHome);
+            log.info("GeoServer startup script executed node={} script={} dataDir={} cacheDir={} logLocation={}",
                     nodeName(deploy),
-                    prepared.geoserverHome.getAbsolutePath(),
+                    startupScriptPath,
                     prepared.dataDirectory.getAbsolutePath(),
                     prepared.cacheDirectory.getAbsolutePath(),
                     prepared.logLocation.getAbsolutePath());
+            startOutputLogger(process.getInputStream(), "GeoServer child output");
+            startOutputLogger(process.getErrorStream(), "GeoServer child error");
+            Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    synchronized (GeoServerAutoConfigurationListener.this) {
+                        if (process != null && process.isAlive()) {
+                            process.destroy();
+                            log.info("GeoServer child process stopped due to main process exit");
+                        }
+                    }
+                }
+            }));
+
             waitUntilReady(deploy);
             if (properties.getInit() != null && properties.getInit().isRunOnStartup()) {
                 log.info("GeoServer is ready, run startup initialization node={}", nodeName(deploy));
                 initService.initialize();
             }
         } catch (RuntimeException ex) {
-            destroyManagedProcess(deploy);
+            destroyProcess(deploy);
             throw ex;
-        } catch (IOException ex) {
-            destroyManagedProcess(deploy);
-            throw new IllegalStateException("GeoServer managed deployment failed: " + ex.getMessage(), ex);
+        } catch (Exception ex) {
+            destroyProcess(deploy);
+            throw new IllegalStateException("GeoServer managed startup failed: " + ex.getMessage(), ex);
         }
     }
 
-    public synchronized void shutdownManagedGeoServer() {
+    private void stopGeoServerSh(boolean failOnError) {
         Deploy deploy = deploy();
-        if (!deploy.isEnabled()) {
-            return;
-        }
-
+        RuntimeException failure = null;
         try {
-            if (shutdownCommand != null) {
-                int exitCode = processLauncher.runAndWait(shutdownCommand, deploy.getShutdownTimeoutSeconds());
+            File script = resolveShutdownScript(deploy);
+            if (script != null) {
+                File home = resolveHomeFromScript(script, deploy.getShutdownScript());
+                Map<String, String> environment = environment(deploy, home,
+                        file(required(deploy.getDataDir(), "geoserver.deploy.dataDir")),
+                        file(required(deploy.getCacheDir(), "geoserver.deploy.cacheDir")),
+                        logLocation(deploy, file(required(deploy.getLogDir(), "geoserver.deploy.logDir"))));
+                chmodExecutable(script, environment, home);
+                String[] cmdArr = {"sh", "-c", script.getAbsolutePath()};
+                Process stopProcess = Runtime.getRuntime().exec(cmdArr, envArray(environment), home);
+                startOutputLogger(stopProcess.getInputStream(), "GeoServer shutdown output");
+                startOutputLogger(stopProcess.getErrorStream(), "GeoServer shutdown error");
+                boolean finished = stopProcess.waitFor(deploy.getShutdownTimeoutSeconds(), TimeUnit.SECONDS);
+                if (!finished) {
+                    stopProcess.destroyForcibly();
+                    throw new IllegalStateException("GeoServer shutdown script timed out: " + script.getAbsolutePath());
+                }
+                int exitCode = stopProcess.exitValue();
                 if (exitCode != 0) {
                     throw new IllegalStateException("GeoServer shutdown script returned exit code " + exitCode);
                 }
-                log.info("GeoServer shutdown script finished node={} exitCode={}", nodeName(deploy), exitCode);
+                log.info("GeoServer shutdown script finished node={} script={}", nodeName(deploy), script.getAbsolutePath());
+            } else if (failOnError) {
+                throw new IllegalStateException("GeoServer shutdown script not found under install-dir: "
+                        + deploy.getShutdownScript());
             }
+        } catch (RuntimeException ex) {
+            failure = ex;
+            log.error("GeoServer shutdown failed node={} message={}", nodeName(deploy), ex.getMessage(), ex);
         } catch (Exception ex) {
-            log.error("GeoServer shutdown script failed node={} message={}", nodeName(deploy), ex.getMessage(), ex);
+            failure = new IllegalStateException("GeoServer shutdown failed: " + ex.getMessage(), ex);
+            log.error("GeoServer shutdown failed node={} message={}", nodeName(deploy), ex.getMessage(), ex);
         } finally {
-            destroyManagedProcess(deploy);
-            if (deploy.isDeleteInstallOnStop() && installDirectory != null) {
-                try {
-                    deleteRecursively(installDirectory);
-                    log.info("GeoServer install directory deleted node={} path={}",
-                            nodeName(deploy), installDirectory.getAbsolutePath());
-                } catch (IOException ex) {
-                    log.error("GeoServer install directory delete failed node={} path={} message={}",
-                            nodeName(deploy), installDirectory.getAbsolutePath(), ex.getMessage(), ex);
-                }
+            destroyProcess(deploy);
+            if (deploy.isDeleteInstallOnStop()) {
+                deleteInstallDirectory(deploy);
             }
             process = null;
-            shutdownCommand = null;
+            shutdownScript = null;
             geoserverHome = null;
             installDirectory = null;
+        }
+
+        if (failOnError && failure != null) {
+            throw failure;
         }
     }
 
@@ -188,17 +217,9 @@ public class GeoServerDeploymentLifecycle {
             throw new IllegalStateException("GeoServer startup script not found under install-dir: "
                     + deploy.getStartupScript());
         }
-        startupScript.setExecutable(true);
         File home = resolveHomeFromScript(startupScript, deploy.getStartupScript());
-        File shutdownScript = new File(home, normalizeRelativePath(deploy.getShutdownScript()));
-        if (shutdownScript.exists()) {
-            shutdownScript.setExecutable(true);
-        }
-
+        File stopScript = new File(home, normalizeRelativePath(deploy.getShutdownScript()));
         Map<String, String> environment = environment(deploy, home, dataDir, cacheDir, logLocation);
-        GeoServerProcessCommand startupCommand = command(deploy, startupScript, home, environment, logDir);
-        GeoServerProcessCommand shutdownCommand = shutdownScript.exists()
-                ? command(deploy, shutdownScript, home, environment, logDir) : null;
 
         PreparedDeployment prepared = new PreparedDeployment();
         prepared.installDirectory = installDir;
@@ -206,9 +227,18 @@ public class GeoServerDeploymentLifecycle {
         prepared.dataDirectory = dataDir;
         prepared.cacheDirectory = cacheDir;
         prepared.logLocation = logLocation;
-        prepared.startupCommand = startupCommand;
-        prepared.shutdownCommand = shutdownCommand;
+        prepared.startupScript = startupScript;
+        prepared.shutdownScript = stopScript.exists() ? stopScript : null;
+        prepared.environment = environment;
         return prepared;
+    }
+
+    private boolean isGeoServerRunning() {
+        if (process != null && process.isAlive()) {
+            return true;
+        }
+        GeoServerStatus status = restClient.checkStatus();
+        return status != null && status.isReachable();
     }
 
     private void waitUntilReady(Deploy deploy) {
@@ -226,7 +256,7 @@ public class GeoServerDeploymentLifecycle {
                 throw new IllegalStateException("GeoServer startup timed out after "
                         + deploy.getStartupTimeoutSeconds() + " seconds, last status: " + lastMessage);
             }
-            sleeper.sleep(1000L);
+            sleep();
         }
     }
 
@@ -271,6 +301,14 @@ public class GeoServerDeploymentLifecycle {
         return target;
     }
 
+    private File resolveShutdownScript(Deploy deploy) {
+        if (shutdownScript != null && shutdownScript.exists()) {
+            return shutdownScript;
+        }
+        File installDir = file(required(deploy.getInstallDir(), "geoserver.deploy.installDir"));
+        return findScript(installDir, deploy.getShutdownScript());
+    }
+
     private File findScript(File installDir, String relativeScript) {
         String normalizedScript = normalizeRelativePath(relativeScript);
         File direct = new File(installDir, normalizedScript);
@@ -301,24 +339,12 @@ public class GeoServerDeploymentLifecycle {
         return home;
     }
 
-    private GeoServerProcessCommand command(Deploy deploy,
-                                            File script,
-                                            File home,
-                                            Map<String, String> environment,
-                                            File logDir) {
-        List<String> command = new ArrayList<String>();
-        command.add("sh");
-        command.add(script.getAbsolutePath());
-        return new GeoServerProcessCommand(nodeName(deploy), command, home,
-                new LinkedHashMap<String, String>(environment), logDir);
-    }
-
     private Map<String, String> environment(Deploy deploy,
                                             File home,
                                             File dataDir,
                                             File cacheDir,
                                             File logLocation) {
-        Map<String, String> environment = new LinkedHashMap<String, String>();
+        Map<String, String> environment = new LinkedHashMap<String, String>(System.getenv());
         environment.put("GEOSERVER_HOME", home.getAbsolutePath());
         environment.put("GEOSERVER_DATA_DIR", dataDir.getAbsolutePath());
         environment.put("GEOWEBCACHE_CACHE_DIR", cacheDir.getAbsolutePath());
@@ -352,6 +378,50 @@ public class GeoServerDeploymentLifecycle {
         return join(options, " ");
     }
 
+    private void chmodExecutable(File target, Map<String, String> environment, File directory)
+            throws IOException, InterruptedException {
+        ProcessBuilder chmodBuilder = new ProcessBuilder("/bin/chmod", "755", target.getAbsolutePath());
+        chmodBuilder.directory(directory);
+        chmodBuilder.redirectErrorStream(true);
+        chmodBuilder.environment().putAll(environment);
+        Process chmodProcess = chmodBuilder.start();
+        startOutputLogger(chmodProcess.getInputStream(), "GeoServer chmod output");
+        boolean finished = chmodProcess.waitFor(10, TimeUnit.SECONDS);
+        if (!finished) {
+            chmodProcess.destroyForcibly();
+            throw new IllegalStateException("chmod timed out: " + target.getAbsolutePath());
+        }
+        if (chmodProcess.exitValue() != 0) {
+            throw new IllegalStateException("chmod failed exitCode=" + chmodProcess.exitValue()
+                    + " file=" + target.getAbsolutePath());
+        }
+    }
+
+    private void startOutputLogger(final InputStream inputStream, final String prefix) {
+        Thread thread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8));
+                try {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        log.info("{}: {}", prefix, line);
+                    }
+                } catch (IOException ex) {
+                    log.warn("{} logger stopped message={}", prefix, ex.getMessage());
+                } finally {
+                    try {
+                        reader.close();
+                    } catch (IOException ex) {
+                        log.debug("{} stream close failed", prefix, ex);
+                    }
+                }
+            }
+        }, prefix.replace(' ', '-').toLowerCase());
+        thread.setDaemon(true);
+        thread.start();
+    }
+
     private void validatePersistentDirectory(String label, File persistentDirectory, File installDir, Deploy deploy)
             throws IOException {
         if (deploy.isDeleteInstallOnStop() && isSameOrChild(persistentDirectory, installDir)) {
@@ -368,7 +438,7 @@ public class GeoServerDeploymentLifecycle {
         return childPath.equals(parentPath) || childPath.startsWith(parentPath + File.separator);
     }
 
-    private void destroyManagedProcess(Deploy deploy) {
+    private void destroyProcess(Deploy deploy) {
         if (process == null) {
             return;
         }
@@ -383,6 +453,18 @@ public class GeoServerDeploymentLifecycle {
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             process.destroyForcibly();
+        }
+    }
+
+    private void deleteInstallDirectory(Deploy deploy) {
+        File installDir = installDirectory != null
+                ? installDirectory : file(required(deploy.getInstallDir(), "geoserver.deploy.installDir"));
+        try {
+            deleteRecursively(installDir);
+            log.info("GeoServer install directory deleted node={} path={}",
+                    nodeName(deploy), installDir.getAbsolutePath());
+        } catch (IOException ex) {
+            throw new IllegalStateException("GeoServer install directory delete failed: " + ex.getMessage(), ex);
         }
     }
 
@@ -429,6 +511,16 @@ public class GeoServerDeploymentLifecycle {
         }
     }
 
+    private String[] envArray(Map<String, String> environment) {
+        String[] envp = new String[environment.size()];
+        int index = 0;
+        for (Map.Entry<String, String> entry : environment.entrySet()) {
+            envp[index] = entry.getKey() + "=" + entry.getValue();
+            index++;
+        }
+        return envp;
+    }
+
     private Deploy deploy() {
         if (properties.getDeploy() == null) {
             properties.setDeploy(new Deploy());
@@ -466,19 +558,12 @@ public class GeoServerDeploymentLifecycle {
         return builder.toString();
     }
 
-    interface Sleeper {
-        void sleep(long millis);
-    }
-
-    private static class ThreadSleeper implements Sleeper {
-        @Override
-        public void sleep(long millis) {
-            try {
-                Thread.sleep(millis);
-            } catch (InterruptedException ex) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException("Interrupted while waiting GeoServer startup", ex);
-            }
+    private void sleep() {
+        try {
+            Thread.sleep(sleepMillis);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting GeoServer startup", ex);
         }
     }
 
@@ -488,7 +573,8 @@ public class GeoServerDeploymentLifecycle {
         private File dataDirectory;
         private File cacheDirectory;
         private File logLocation;
-        private GeoServerProcessCommand startupCommand;
-        private GeoServerProcessCommand shutdownCommand;
+        private File startupScript;
+        private File shutdownScript;
+        private Map<String, String> environment;
     }
 }

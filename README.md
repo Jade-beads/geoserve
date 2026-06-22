@@ -180,6 +180,14 @@ src/main/resources/geoserver/geoserver-bin.zip
 
 停止项目时，应用会优先执行 `bin/shutdown.sh`，再销毁子进程。默认只删除 `install-dir`，不会删除 `data-dir`、`cache-dir`、`log-dir`。
 
+切片目录需要在项目启动前配置 `GEOSERVER_DEPLOY_CACHE_DIR`，或在配置文件中设置 `geoserver.deploy.cache-dir`。代码会在 GeoServer 启动脚本执行前注入到 `GEOWEBCACHE_CACHE_DIR`，因此 GeoServer 启动后会直接把 GWC 切片写到该目录。生产环境建议配置到 A/B 服务器共同可访问的挂载盘，例如：
+
+```bash
+export GEOSERVER_DEPLOY_CACHE_DIR=/mnt/share/geowebcache/site-selection
+```
+
+该目录不能放到 `GEOSERVER_DEPLOY_INSTALL_DIR` 里面，否则项目停止删除解压运行目录时会误删切片缓存，应用会直接启动失败并输出错误。
+
 ### 关键配置
 
 | 参数 | 说明 | 默认值 |
@@ -215,7 +223,7 @@ export GEOSERVER_DEPLOY_INSTALL_DIR=/opt/geoserve/runtime/a/install
 export GEOSERVER_DEPLOY_DATA_DIR=/opt/geoserve/runtime/a/data
 export GEOSERVER_DEPLOY_LOG_DIR=/opt/geoserve/logs/a
 export GEOSERVER_DEPLOY_LOG_LOCATION=/opt/geoserve/logs/a/geoserver.log
-export GEOSERVER_DEPLOY_CACHE_DIR=/share/geowebcache/site-selection
+export GEOSERVER_DEPLOY_CACHE_DIR=/mnt/share/geowebcache/site-selection
 export GEOSERVER_BASE_URL=http://localhost:8080/geoserver
 export GEOSERVER_INIT_RUN_ON_STARTUP=true
 ```
