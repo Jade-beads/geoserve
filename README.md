@@ -7,7 +7,7 @@
 - 创建缺失的 `site_selection` 工作区。
 - 创建缺失的工作区样式：`count_style`、`price_style`。
 - 创建缺失的 GaussDB/openGauss PostGIS 兼容数据源：`gauss_store`。
-- 创建缺失的 SQL View 图层：`basic_all`、`basic`、`scene`、`finance_app`、`land_val`。
+- 创建缺失的 SQL View 图层：`basic_all`、`basic`、`scene`、`finance_app`、`land_val`、`mode_result`。
 - 为图层设置默认样式。
 - 只为 `basic_all` 创建 GeoWebCache WMTS 配置，使用 `EPSG:3857` 和 `image/png`。
 - 每一步都会先判断资源是否存在；存在则返回 `SKIPPED` 并继续执行下一步，不删除、不覆盖、不重建已有资源。
@@ -78,6 +78,7 @@ mvn -Dmaven.repo.local=.m2/repository spring-boot:run
 | `SCENE_BATCH_ID_DEFAULT` | `scene` 的 `batchId` 默认值 | `1001` |
 | `FINANCE_APP_BATCH_ID_DEFAULT` | `finance_app` 的 `batchId` 默认值 | `1001` |
 | `LAND_VAL_BATCH_ID_DEFAULT` | `land_val` 的 `batchId` 默认值 | `1001` |
+| `MODE_RESULT_BATCH_ID_DEFAULT` | `mode_result` 的 `batch_id` 默认值 | `1001` |
 
 启动命令示例：
 
@@ -93,6 +94,7 @@ export GAUSS_DB_SCHEMA="public"
 export GAUSS_DB_USERNAME="<db-user>"
 export GAUSS_DB_PASSWORD="<db-password>"
 export BASIC_ALL_BATCH_ID_DEFAULT="1001"
+export MODE_RESULT_BATCH_ID_DEFAULT="1001"
 
 mvn -Dmaven.repo.local=.m2/repository spring-boot:run
 ```
@@ -248,6 +250,7 @@ B 节点只需要把 `NODE_NAME`、`INSTALL_DIR`、`DATA_DIR`、`LOG_DIR` 改成
 | `scene` | WMS | `classpath:sql/scene.sql` | `tb_grid_personalized_portrait_total` | `batchId county ptype` | `count_style` |
 | `finance_app` | WMS | `classpath:sql/finance_app.sql` | `tb_grid_finance_app_total` | `batchId county ptype` | `count_style` |
 | `land_val` | WMS | `classpath:sql/land_val.sql` | `tb_grid_land_value_total` | `batchId county ptype` | `price_style` |
+| `mode_result` | WMS | `classpath:sql/mode_result.sql` | `tb_grid_score_result` | `batch_id type` | `count_style` |
 
 所有 SQL View 模板统一返回：
 
@@ -255,13 +258,14 @@ B 节点只需要把 `NODE_NAME`、`INSTALL_DIR`、`DATA_DIR`、`LOG_DIR` 改成
 - `geom_polygon`
 - `total_num`
 
-几何字段统一为 `geom_polygon`，SRID 为 `4326`。SQL 已对应热力图分区任务写入的 5 张总表。
+几何字段统一为 `geom_polygon`，SRID 为 `4326`。SQL 已对应热力图分区任务写入的分区结果表。
 
 ## 参数规则
 
 | 参数 | 适用图层 | 默认值 | 规则 |
 | --- | --- | --- | --- |
-| `batchId` | 全部图层 | 每个图层单独配置 | 只能是数字 |
+| `batchId` | 除 `mode_result` 外的图层 | 每个图层单独配置 | 只能是数字 |
+| `batch_id` | `mode_result` | `MODE_RESULT_BATCH_ID_DEFAULT` | 只能是数字 |
 | `county` | WMS 图层 | `-1` | `-1` 表示全部县区；其他值映射 `code_coun` |
 | `ptype` | `basic` | `all` | 多选值过滤，映射 `population_type`，允许 `all/home/work/home\|work/work\|home` |
 | `age` | `basic` | `all` | 多选值过滤，映射 `age_type` |
@@ -269,8 +273,9 @@ B 节点只需要把 `NODE_NAME`、`INSTALL_DIR`、`DATA_DIR`、`LOG_DIR` 改成
 | `ptype` | `scene` | `hieg_end_individual` | 列名参数，只允许场景标签白名单列 |
 | `ptype` | `finance_app` | `debit_card_bc` | 列名参数，只允许金融 app 白名单列 |
 | `ptype` | `land_val` | `average_rent` | 列名参数，只允许 `average_rent/average_house_price` |
+| `type` | `mode_result` | `grid_indicator_score` | 列名参数，只允许评分结果表白名单列 |
 
-SQL View 文件使用 GeoServer 的 `%param%` 占位符。`basic` 的 `ptype/age/gender` 支持用 `|` 多选过滤，并在过滤后按 `grid_id/geom_polygon` 汇总 `total_num`。`scene`、`finance_app`、`land_val` 的 `ptype` 会直接替换到 SQL 列名位置，因此必须保持 `application.yml` 中的白名单正则足够严格。
+SQL View 文件使用 GeoServer 的 `%param%` 占位符。`basic` 的 `ptype/age/gender` 支持用 `|` 多选过滤，并在过滤后按 `grid_id/geom_polygon` 汇总 `total_num`。`scene`、`finance_app`、`land_val` 的 `ptype` 和 `mode_result` 的 `type` 会直接替换到 SQL 列名位置，因此必须保持 `application.yml` 中的白名单正则足够严格。
 
 ## 请求示例
 
@@ -320,6 +325,24 @@ GET /geoserver/site_selection/wms?
 
 ```text
 viewparams=batchId:1001;county:-1;ptype:%223c%22
+```
+
+模型结果 WMS 示例：
+
+```text
+GET /geoserver/site_selection/wms?
+  service=WMS&
+  version=1.1.0&
+  request=GetMap&
+  layers=site_selection:mode_result&
+  styles=&
+  bbox=<minx>,<miny>,<maxx>,<maxy>&
+  width=768&
+  height=512&
+  srs=EPSG:4326&
+  format=image/png&
+  transparent=true&
+  viewparams=batch_id:1001;type:grid_indicator_score
 ```
 
 WMTS 参数化瓦片示例：

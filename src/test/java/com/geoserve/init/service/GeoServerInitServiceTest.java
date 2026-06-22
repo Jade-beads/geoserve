@@ -31,7 +31,7 @@ import static org.mockito.Mockito.when;
 class GeoServerInitServiceTest {
 
     @Test
-    void initializeRunsSingleWorkspaceDatastoreAndFiveLayersInOrder() {
+    void initializeRunsSingleWorkspaceDatastoreAndSixLayersInOrder() {
         GeoServerRestClient client = mock(GeoServerRestClient.class);
         GeoServerInitProperties properties = properties();
 
@@ -52,14 +52,14 @@ class GeoServerInitServiceTest {
 
         InitResult result = new GeoServerInitService(client, properties).initialize();
 
-        // 顺序与生产链路一致：workspace -> styles -> datastore -> 5 layers -> 1 GWC。
-        assertThat(result.getActions()).hasSize(10);
+        // 顺序与生产链路一致：workspace -> styles -> datastore -> 6 layers -> 1 GWC。
+        assertThat(result.getActions()).hasSize(11);
         assertThat(result.getActions())
                 .extracting(ResourceAction::getStatus)
                 .containsExactly(ResourceStatus.CREATED, ResourceStatus.CREATED, ResourceStatus.SKIPPED,
                         ResourceStatus.CREATED, ResourceStatus.CREATED, ResourceStatus.CREATED,
                         ResourceStatus.CREATED, ResourceStatus.CREATED, ResourceStatus.CREATED,
-                        ResourceStatus.CREATED);
+                        ResourceStatus.CREATED, ResourceStatus.CREATED);
         verify(client).ensureWorkspace();
         verify(client).ensureDatastore(properties.getDatastore());
         verify(client).ensureGwcLayer(properties.getLayers().get(0));
@@ -67,6 +67,7 @@ class GeoServerInitServiceTest {
         verify(client, never()).ensureGwcLayer(properties.getLayers().get(2));
         verify(client, never()).ensureGwcLayer(properties.getLayers().get(3));
         verify(client, never()).ensureGwcLayer(properties.getLayers().get(4));
+        verify(client, never()).ensureGwcLayer(properties.getLayers().get(5));
 
         InOrder inOrder = inOrder(client);
         inOrder.verify(client).ensureWorkspace();
@@ -92,7 +93,7 @@ class GeoServerInitServiceTest {
         InitResult result = new GeoServerInitService(client, properties).initialize();
 
         // 失败步骤会被记录，但服务仍会继续处理后续配置项。
-        assertThat(result.getActions()).hasSize(10);
+        assertThat(result.getActions()).hasSize(11);
         assertThat(result.getActions().get(0).getStatus()).isEqualTo(ResourceStatus.FAILED);
         assertThat(result.getActions().get(0).getMessage()).contains("GeoServer rejected workspace");
         assertThat(result.getActions().get(1).getStatus()).isEqualTo(ResourceStatus.CREATED);
@@ -124,7 +125,7 @@ class GeoServerInitServiceTest {
     }
 
     private GeoServerInitProperties properties() {
-        // 最小化内存配置，等价于 YAML 中 site_selection 单工作区、单数据源、5 图层。
+        // 最小化内存配置，等价于 YAML 中 site_selection 单工作区、单数据源、6 图层。
         Datastore datastore = new Datastore();
         datastore.setName("gauss_store");
 
@@ -145,7 +146,8 @@ class GeoServerInitServiceTest {
                 layer("basic", false),
                 layer("scene", false),
                 layer("finance_app", false),
-                layer("land_val", false)));
+                layer("land_val", false),
+                layer("mode_result", false)));
         return properties;
     }
 

@@ -179,6 +179,37 @@ class GeoServerRestClientTest {
     }
 
     @Test
+    void ensureSqlViewLayerCanUseConfiguredBatchIdParameterNameForModeResult() {
+        Layer layer = sqlViewLayer("mode_result", false);
+        layer.setDefaultStyle("count_style");
+        layer.setSqlLocation("classpath:sql/mode_result.sql");
+        layer.setBatchIdParameterName("batch_id");
+        layer.setSqlParameters(Collections.singletonList(modeResultType()));
+
+        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/layers/site_selection:mode_result.json"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces/site_selection/datastores/gauss_store/featuretypes?recalculate=nativebbox,latlonbbox"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(content().string(containsString("JDBC_VIRTUAL_TABLE")))
+                .andExpect(content().string(containsString("FROM tb_grid_score_result")))
+                .andExpect(content().string(containsString("COALESCE(%type%, 0) AS total_num")))
+                .andExpect(content().string(containsString("WHERE batch_id = CAST('%batch_id%' AS BIGINT)")))
+                .andExpect(content().string(containsString("\"name\":\"batch_id\",\"defaultValue\":\"1001\",\"regexpValidator\":\"^[0-9]+$\"")))
+                .andExpect(content().string(containsString("\"name\":\"type\",\"defaultValue\":\"grid_indicator_score\",\"regexpValidator\":\"^(grid_indicator_score|grid_pop_score|grid_peer_score|grid_resource_score|grid_traffic_score|grid_road_score)$\"")))
+                .andRespond(withStatus(HttpStatus.CREATED));
+        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/layers/site_selection:mode_result"))
+                .andExpect(method(HttpMethod.PUT))
+                .andExpect(content().string(containsString("\"defaultStyle\":{\"name\":\"site_selection:count_style\"}")))
+                .andRespond(withSuccess());
+
+        ResourceAction action = client.ensureFeatureType(layer);
+
+        assertThat(action.getStatus()).isEqualTo(ResourceStatus.CREATED);
+        server.verify();
+    }
+
+    @Test
     @ExtendWith(OutputCaptureExtension.class)
     void ensureSqlViewLayerLogsDiagnosticContextWhenGeoServerRejectsFeatureType(CapturedOutput output) {
         Layer layer = sqlViewLayer("basic", false);
@@ -313,6 +344,14 @@ class GeoServerRestClientTest {
 
     private SqlParameter gender() {
         return stringPipeParameter("gender");
+    }
+
+    private SqlParameter modeResultType() {
+        SqlParameter parameter = new SqlParameter();
+        parameter.setName("type");
+        parameter.setDefaultValue("grid_indicator_score");
+        parameter.setRegexpValidator("^(grid_indicator_score|grid_pop_score|grid_peer_score|grid_resource_score|grid_traffic_score|grid_road_score)$");
+        return parameter;
     }
 
     private SqlParameter stringPipeParameter(String name) {

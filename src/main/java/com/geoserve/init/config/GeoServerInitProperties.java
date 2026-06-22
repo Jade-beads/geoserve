@@ -455,6 +455,8 @@ public class GeoServerInitProperties {
         private String sqlLocation;
         /** 每个图层单独配置的 batchId 默认值。 */
         private String batchIdDefault;
+        /** SQL View 中批次参数名称；默认沿用已有图层的 batchId。 */
+        private String batchIdParameterName = "batchId";
         /** GeoServer 发布 FeatureType 时声明的 SRS。 */
         private String srs = "EPSG:4326";
         /** GeoServer JDBC virtual table 必需的几何字段元数据。 */
@@ -514,6 +516,14 @@ public class GeoServerInitProperties {
 
         public void setBatchIdDefault(String batchIdDefault) {
             this.batchIdDefault = batchIdDefault;
+        }
+
+        public String getBatchIdParameterName() {
+            return batchIdParameterName;
+        }
+
+        public void setBatchIdParameterName(String batchIdParameterName) {
+            this.batchIdParameterName = batchIdParameterName;
         }
 
         public String getSrs() {

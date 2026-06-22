@@ -381,14 +381,16 @@ public class GeoServerRestClient {
      */
     private List<Map<String, Object>> sqlParameters(Layer layer) {
         List<Map<String, Object>> parameters = new ArrayList<Map<String, Object>>();
-        parameters.add(sqlParameter("batchId",
+        String batchIdParameterName = hasText(layer.getBatchIdParameterName())
+                ? layer.getBatchIdParameterName() : "batchId";
+        parameters.add(sqlParameter(batchIdParameterName,
                 required(layer.getBatchIdDefault(), "layer.batchIdDefault"),
                 "^[0-9]+$"));
         if (layer.getSqlParameters() == null) {
             return parameters;
         }
         for (SqlParameter parameter : layer.getSqlParameters()) {
-            if ("batchId".equals(parameter.getName())) {
+            if (batchIdParameterName.equals(parameter.getName())) {
                 continue;
             }
             parameters.add(sqlParameter(

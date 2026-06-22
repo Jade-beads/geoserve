@@ -181,3 +181,22 @@ geoserver:
           # ptype 在该图层中是列名参数，必须严格限制在分区总表已有列内。
           default-value: average_rent
           regexp-validator: '^(average_rent|average_house_price)$'
+
+    - name: mode_result
+      title: 模型结果
+      source-type: SQL_VIEW
+      sql-location: classpath:sql/mode_result.sql
+      batch-id-default: ${MODE_RESULT_BATCH_ID_DEFAULT:1001}
+      # 该图层对外暴露的 viewparams 批次参数按业务表字段命名为 batch_id。
+      batch-id-parameter-name: batch_id
+      srs: EPSG:4326
+      geometry:
+        name: geom_polygon
+        type: Polygon
+        srid: 4326
+      default-style: count_style
+      sql-parameters:
+        - name: type
+          # type 在该图层中是列名参数，必须严格限制在分区结果表已有评分列内。
+          default-value: grid_indicator_score
+          regexp-validator: '^(grid_indicator_score|grid_pop_score|grid_peer_score|grid_resource_score|grid_traffic_score|grid_road_score)$'

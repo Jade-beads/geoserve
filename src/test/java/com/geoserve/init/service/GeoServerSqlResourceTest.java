@@ -24,7 +24,8 @@ class GeoServerSqlResourceTest {
                 "sql/basic.sql",
                 "sql/scene.sql",
                 "sql/finance_app.sql",
-                "sql/land_val.sql"
+                "sql/land_val.sql",
+                "sql/mode_result.sql"
         };
 
         for (String sqlResource : sqlResources) {
@@ -63,6 +64,18 @@ class GeoServerSqlResourceTest {
     }
 
     @Test
+    void modeResultReadsScoreResultByBatchIdAndSelectedTypeColumnWithoutGrouping() throws Exception {
+        String sql = read("sql/mode_result.sql");
+
+        assertThat(sql).contains("FROM tb_grid_score_result");
+        assertThat(sql).contains("COALESCE(%type%, 0) AS total_num");
+        assertThat(sql).contains("WHERE batch_id = CAST('%batch_id%' AS BIGINT)");
+        assertThat(sql).contains("grid_id");
+        assertThat(sql).contains("geom_polygon");
+        assertThat(sql).doesNotContain("GROUP BY");
+    }
+
+    @Test
     void applicationYamlUsesLayerSpecificPtypeDefaultsAndWhitelists() throws Exception {
         String yaml = read("application.yml");
 
@@ -73,6 +86,11 @@ class GeoServerSqlResourceTest {
         assertThat(yaml).contains("debit_card_bc|debit_card_abc|debit_card_icbc");
         assertThat(yaml).contains("default-value: average_rent");
         assertThat(yaml).contains("average_rent|average_house_price");
+        assertThat(yaml).contains("name: mode_result");
+        assertThat(yaml).contains("sql-location: classpath:sql/mode_result.sql");
+        assertThat(yaml).contains("batch-id-parameter-name: batch_id");
+        assertThat(yaml).contains("default-value: grid_indicator_score");
+        assertThat(yaml).contains("grid_indicator_score|grid_pop_score|grid_peer_score");
     }
 
     @Test
@@ -114,6 +132,7 @@ class GeoServerSqlResourceTest {
         assertThat(yaml).doesNotContain("scene");
         assertThat(yaml).doesNotContain("finance_app");
         assertThat(yaml).doesNotContain("land_val");
+        assertThat(yaml).doesNotContain("mode_result");
     }
 
     @Test
