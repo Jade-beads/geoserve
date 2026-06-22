@@ -148,6 +148,30 @@ class GeoServerSqlResourceTest {
         assertThat(example).doesNotContain("geoserver");
     }
 
+    @Test
+    void applicationYamlDefinesManagedDeploymentAndProjectFileLogging() throws Exception {
+        String yaml = read("application.yml");
+
+        assertThat(yaml).contains("logging:");
+        assertThat(yaml).contains("name: ${APP_LOG_FILE:logs/geoserve-init.log}");
+        assertThat(yaml).contains("deploy:");
+        assertThat(yaml).contains("enabled: ${GEOSERVER_DEPLOY_ENABLED:false}");
+        assertThat(yaml).contains("archive-location: ${GEOSERVER_DEPLOY_ARCHIVE_LOCATION:classpath:geoserver/geoserver-bin.zip}");
+        assertThat(yaml).contains("data-dir: ${GEOSERVER_DEPLOY_DATA_DIR:runtime/geoserver/data}");
+        assertThat(yaml).contains("cache-dir: ${GEOSERVER_DEPLOY_CACHE_DIR:runtime/geoserver/gwc-cache}");
+        assertThat(yaml).contains("log-location: ${GEOSERVER_DEPLOY_LOG_LOCATION:logs/geoserver/geoserver.log}");
+        assertThat(yaml).contains("startup-timeout-seconds: ${GEOSERVER_DEPLOY_STARTUP_TIMEOUT_SECONDS:120}");
+    }
+
+    @Test
+    void geoserverArchiveDirectoryKeepsPlaceholderButIgnoresLargeRuntimePackages() throws Exception {
+        String gitignore = readFile(".gitignore");
+
+        assertThat(gitignore).contains("src/main/resources/geoserver/*.zip");
+        assertThat(readFile("src/main/resources/geoserver/.gitkeep"))
+                .contains("本目录用于本地放置 GeoServer ZIP 包");
+    }
+
     private void assertDynamicColumnSql(String resource, String tableName) throws Exception {
         String sql = read(resource);
 

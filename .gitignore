@@ -6,3 +6,5 @@ target/
 .project
 .settings/
 .env.local-postgres
+src/main/resources/geoserver/*.zip
+!src/main/resources/geoserver/.gitkeep

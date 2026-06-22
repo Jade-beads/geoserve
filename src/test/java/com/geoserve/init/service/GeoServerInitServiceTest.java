@@ -2,6 +2,7 @@ package com.geoserve.init.service;
 
 import com.geoserve.init.config.GeoServerInitProperties;
 import com.geoserve.init.config.GeoServerInitProperties.Datastore;
+import com.geoserve.init.config.GeoServerInitProperties.Deploy;
 import com.geoserve.init.config.GeoServerInitProperties.Layer;
 import com.geoserve.init.config.GeoServerInitProperties.Style;
 import com.geoserve.init.config.GeoServerInitProperties.Wmts;
@@ -95,6 +96,31 @@ class GeoServerInitServiceTest {
         assertThat(result.getActions().get(0).getStatus()).isEqualTo(ResourceStatus.FAILED);
         assertThat(result.getActions().get(0).getMessage()).contains("GeoServer rejected workspace");
         assertThat(result.getActions().get(1).getStatus()).isEqualTo(ResourceStatus.CREATED);
+    }
+
+    @Test
+    void startupRunnerSkipsInitWhenManagedDeploymentWillInitializeAfterGeoServerReady() throws Exception {
+        GeoServerInitProperties properties = properties();
+        properties.getInit().setRunOnStartup(true);
+        Deploy deploy = new Deploy();
+        deploy.setEnabled(true);
+        properties.setDeploy(deploy);
+        GeoServerInitService initService = mock(GeoServerInitService.class);
+
+        new GeoServerStartupRunner(properties, initService).run(mock(org.springframework.boot.ApplicationArguments.class));
+
+        verify(initService, never()).initialize();
+    }
+
+    @Test
+    void startupRunnerKeepsOriginalRunOnStartupBehaviorWhenManagedDeploymentDisabled() throws Exception {
+        GeoServerInitProperties properties = properties();
+        properties.getInit().setRunOnStartup(true);
+        GeoServerInitService initService = mock(GeoServerInitService.class);
+
+        new GeoServerStartupRunner(properties, initService).run(mock(org.springframework.boot.ApplicationArguments.class));
+
+        verify(initService).initialize();
     }
 
     private GeoServerInitProperties properties() {

@@ -29,6 +29,8 @@ public class GeoServerInitProperties {
     private String workspace = "site_selection";
     /** 启动行为开关。 */
     private Init init = new Init();
+    /** 本机托管 GeoServer 子进程的部署配置。 */
+    private Deploy deploy = new Deploy();
     /** 单个高斯数据库数据源配置。 */
     private Datastore datastore = new Datastore();
     /** 需要上传到根工作区的 SLD 样式。 */
@@ -76,6 +78,14 @@ public class GeoServerInitProperties {
         this.init = init;
     }
 
+    public Deploy getDeploy() {
+        return deploy;
+    }
+
+    public void setDeploy(Deploy deploy) {
+        this.deploy = deploy;
+    }
+
     public Datastore getDatastore() {
         return datastore;
     }
@@ -110,6 +120,199 @@ public class GeoServerInitProperties {
 
         public void setRunOnStartup(boolean runOnStartup) {
             this.runOnStartup = runOnStartup;
+        }
+    }
+
+    public static class Deploy {
+        /** 是否由当前 Java 服务在本机解压并启动 GeoServer。 */
+        private boolean enabled;
+        /** A/B 节点标识，只用于日志区分。 */
+        private String nodeName = "local";
+        /** classpath 或 file 资源位置，默认由部署包提供本地 GeoServer ZIP。 */
+        private String archiveLocation = "classpath:geoserver/geoserver-bin.zip";
+        /** 托管部署工作根目录。 */
+        private String workDir = "runtime/geoserver";
+        /** GeoServer ZIP 解压目录；停止时只清理该目录。 */
+        private String installDir = "runtime/geoserver/install";
+        /** 停止 Java 服务时是否删除解压出的运行目录。 */
+        private boolean deleteInstallOnStop = true;
+        /** GeoServer data directory，建议每个节点独立配置。 */
+        private String dataDir = "runtime/geoserver/data";
+        /** GeoWebCache 切片缓存目录，可配置为共享盘目录。 */
+        private String cacheDir = "runtime/geoserver/gwc-cache";
+        /** GeoServer 日志目录。 */
+        private String logDir = "logs/geoserver";
+        /** GeoServer 自身日志文件；为空时使用 logDir/geoserver.log。 */
+        private String logLocation;
+        /** 启动 GeoServer 使用的 JAVA_HOME；为空时继承当前环境。 */
+        private String javaHome;
+        /** GeoServer HTTP 端口，默认匹配官方二进制包的 8080。 */
+        private int port = 8080;
+        /** GeoServer Web 上下文路径。 */
+        private String contextPath = "/geoserver";
+        /** 等待 GeoServer REST 可用的超时时间，单位秒。 */
+        private int startupTimeoutSeconds = 120;
+        /** 停止脚本和进程销毁的等待时间，单位秒。 */
+        private int shutdownTimeoutSeconds = 30;
+        /** 附加 JVM 参数，会合并到 JAVA_OPTS。 */
+        private List<String> jvmArgs = new ArrayList<String>();
+        /** 相对 GeoServer home 的启动脚本。 */
+        private String startupScript = "bin/startup.sh";
+        /** 相对 GeoServer home 的停止脚本。 */
+        private String shutdownScript = "bin/shutdown.sh";
+        /** 共享盘哨兵文件；配置后会写入 GEOSERVER_REQUIRE_FILE。 */
+        private String requireFile;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getNodeName() {
+            return nodeName;
+        }
+
+        public void setNodeName(String nodeName) {
+            this.nodeName = nodeName;
+        }
+
+        public String getArchiveLocation() {
+            return archiveLocation;
+        }
+
+        public void setArchiveLocation(String archiveLocation) {
+            this.archiveLocation = archiveLocation;
+        }
+
+        public String getWorkDir() {
+            return workDir;
+        }
+
+        public void setWorkDir(String workDir) {
+            this.workDir = workDir;
+        }
+
+        public String getInstallDir() {
+            return installDir;
+        }
+
+        public void setInstallDir(String installDir) {
+            this.installDir = installDir;
+        }
+
+        public boolean isDeleteInstallOnStop() {
+            return deleteInstallOnStop;
+        }
+
+        public void setDeleteInstallOnStop(boolean deleteInstallOnStop) {
+            this.deleteInstallOnStop = deleteInstallOnStop;
+        }
+
+        public String getDataDir() {
+            return dataDir;
+        }
+
+        public void setDataDir(String dataDir) {
+            this.dataDir = dataDir;
+        }
+
+        public String getCacheDir() {
+            return cacheDir;
+        }
+
+        public void setCacheDir(String cacheDir) {
+            this.cacheDir = cacheDir;
+        }
+
+        public String getLogDir() {
+            return logDir;
+        }
+
+        public void setLogDir(String logDir) {
+            this.logDir = logDir;
+        }
+
+        public String getLogLocation() {
+            return logLocation;
+        }
+
+        public void setLogLocation(String logLocation) {
+            this.logLocation = logLocation;
+        }
+
+        public String getJavaHome() {
+            return javaHome;
+        }
+
+        public void setJavaHome(String javaHome) {
+            this.javaHome = javaHome;
+        }
+
+        public int getPort() {
+            return port;
+        }
+
+        public void setPort(int port) {
+            this.port = port;
+        }
+
+        public String getContextPath() {
+            return contextPath;
+        }
+
+        public void setContextPath(String contextPath) {
+            this.contextPath = contextPath;
+        }
+
+        public int getStartupTimeoutSeconds() {
+            return startupTimeoutSeconds;
+        }
+
+        public void setStartupTimeoutSeconds(int startupTimeoutSeconds) {
+            this.startupTimeoutSeconds = startupTimeoutSeconds;
+        }
+
+        public int getShutdownTimeoutSeconds() {
+            return shutdownTimeoutSeconds;
+        }
+
+        public void setShutdownTimeoutSeconds(int shutdownTimeoutSeconds) {
+            this.shutdownTimeoutSeconds = shutdownTimeoutSeconds;
+        }
+
+        public List<String> getJvmArgs() {
+            return jvmArgs;
+        }
+
+        public void setJvmArgs(List<String> jvmArgs) {
+            this.jvmArgs = jvmArgs;
+        }
+
+        public String getStartupScript() {
+            return startupScript;
+        }
+
+        public void setStartupScript(String startupScript) {
+            this.startupScript = startupScript;
+        }
+
+        public String getShutdownScript() {
+            return shutdownScript;
+        }
+
+        public void setShutdownScript(String shutdownScript) {
+            this.shutdownScript = shutdownScript;
+        }
+
+        public String getRequireFile() {
+            return requireFile;
+        }
+
+        public void setRequireFile(String requireFile) {
+            this.requireFile = requireFile;
         }
     }
 

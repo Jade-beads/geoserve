@@ -151,6 +151,77 @@ GET /geoserver/site_selection_local/wms?
   viewparams=batchId:202511310100;county:-1;ptype:home%7Cwork;age:all;gender:all
 ```
 
+## 本机托管 GeoServer 部署
+
+当前服务支持“本机管理”模式：A/B 两台服务器各启动一套本 Java 服务，每套服务只负责解压、启动、停止本机 GeoServer。外部轮循由 Nginx、SLB 或其他负载均衡组件完成。
+
+GeoServer 有 JMS Cluster 方案，但它主要用于配置同步，不负责业务数据和切片数据分发。当前项目不启用 JMS 集群，按两套独立 GeoServer 部署处理。GeoWebCache 切片缓存通过 `GEOWEBCACHE_CACHE_DIR` 独立配置，可指向 A/B 都能访问的共享盘目录；严格生产多实例缓存方案仍建议评估 standalone GeoWebCache。
+
+### 资源包放置
+
+把 GeoServer 官方 ZIP 包放到：
+
+```text
+src/main/resources/geoserver/geoserver-bin.zip
+```
+
+该目录保留了 `.gitkeep`，真实 ZIP 包已在 `.gitignore` 中忽略，不会提交到 GitHub。当前实现只解压 ZIP 包；压缩包内需要包含 `bin/startup.sh` 和 `bin/shutdown.sh`。
+
+### 启动流程
+
+开启托管部署后，应用启动顺序如下：
+
+1. 创建 `work-dir`、`install-dir`、`data-dir`、`cache-dir`、`log-dir`。
+2. 删除旧的 `install-dir`，重新解压 GeoServer ZIP。
+3. 设置 `GEOSERVER_DATA_DIR`、`GEOWEBCACHE_CACHE_DIR`、`GEOSERVER_LOG_LOCATION`、`JAVA_HOME`、`JAVA_OPTS`。
+4. 执行 GeoServer `bin/startup.sh`。
+5. 轮询 `GET /rest/about/version`，等待 GeoServer 可用。
+6. 如果 `GEOSERVER_INIT_RUN_ON_STARTUP=true`，再执行 workspace、style、datastore、layer、GWC 初始化。
+
+停止项目时，应用会优先执行 `bin/shutdown.sh`，再销毁子进程。默认只删除 `install-dir`，不会删除 `data-dir`、`cache-dir`、`log-dir`。
+
+### 关键配置
+
+| 参数 | 说明 | 默认值 |
+| --- | --- | --- |
+| `GEOSERVER_DEPLOY_ENABLED` | 是否启用本机托管 GeoServer | `false` |
+| `GEOSERVER_DEPLOY_NODE_NAME` | 当前节点名，用于日志区分 | `local` |
+| `GEOSERVER_DEPLOY_ARCHIVE_LOCATION` | GeoServer ZIP 包位置 | `classpath:geoserver/geoserver-bin.zip` |
+| `GEOSERVER_DEPLOY_WORK_DIR` | 托管部署根目录 | `runtime/geoserver` |
+| `GEOSERVER_DEPLOY_INSTALL_DIR` | GeoServer 解压运行目录，停止时可删除 | `runtime/geoserver/install` |
+| `GEOSERVER_DEPLOY_DATA_DIR` | GeoServer 数据目录，建议 A/B 各自独立 | `runtime/geoserver/data` |
+| `GEOSERVER_DEPLOY_CACHE_DIR` | GWC 切片缓存目录，可配置共享盘 | `runtime/geoserver/gwc-cache` |
+| `GEOSERVER_DEPLOY_LOG_DIR` | GeoServer 日志目录 | `logs/geoserver` |
+| `GEOSERVER_DEPLOY_LOG_LOCATION` | GeoServer 自身日志文件 | `logs/geoserver/geoserver.log` |
+| `GEOSERVER_DEPLOY_JAVA_HOME` | 启动 GeoServer 使用的 JDK 路径 | 空，继承当前环境 |
+| `GEOSERVER_DEPLOY_PORT` | GeoServer 端口 | `8080` |
+| `GEOSERVER_DEPLOY_CONTEXT_PATH` | GeoServer 上下文路径 | `/geoserver` |
+| `GEOSERVER_DEPLOY_STARTUP_TIMEOUT_SECONDS` | 等待 GeoServer 可用的超时时间 | `120` |
+| `GEOSERVER_DEPLOY_SHUTDOWN_TIMEOUT_SECONDS` | 停止脚本和进程销毁超时时间 | `30` |
+| `APP_LOG_FILE` | 当前初始化服务的输出日志文件 | `logs/geoserve-init.log` |
+
+`GEOSERVER_BASE_URL` 必须和托管 GeoServer 的真实端口、上下文路径一致。默认是 `http://localhost:8080/geoserver`；如果调整 `GEOSERVER_DEPLOY_PORT` 或 `GEOSERVER_DEPLOY_CONTEXT_PATH`，需要同步调整 `GEOSERVER_BASE_URL`。
+
+`data-dir`、`cache-dir`、`log-dir`、`log-location` 不能放在 `install-dir` 下面。因为 `install-dir` 会在停止时删除，这些目录如果配置在里面会导致可复用数据被误删，应用会直接启动失败并输出明确错误。
+
+### A/B 节点示例
+
+A 节点：
+
+```bash
+export GEOSERVER_DEPLOY_ENABLED=true
+export GEOSERVER_DEPLOY_NODE_NAME=A
+export GEOSERVER_DEPLOY_INSTALL_DIR=/opt/geoserve/runtime/a/install
+export GEOSERVER_DEPLOY_DATA_DIR=/opt/geoserve/runtime/a/data
+export GEOSERVER_DEPLOY_LOG_DIR=/opt/geoserve/logs/a
+export GEOSERVER_DEPLOY_LOG_LOCATION=/opt/geoserve/logs/a/geoserver.log
+export GEOSERVER_DEPLOY_CACHE_DIR=/share/geowebcache/site-selection
+export GEOSERVER_BASE_URL=http://localhost:8080/geoserver
+export GEOSERVER_INIT_RUN_ON_STARTUP=true
+```
+
+B 节点只需要把 `NODE_NAME`、`INSTALL_DIR`、`DATA_DIR`、`LOG_DIR` 改成 B 节点自己的目录，`GEOSERVER_DEPLOY_CACHE_DIR` 可以继续指向同一个共享盘目录。
+
 ## 资源清单
 
 样式：

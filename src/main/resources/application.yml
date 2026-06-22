@@ -2,6 +2,13 @@ server:
   # 当前初始化服务的本地端口，不是 GeoServer 端口。
   port: 8081
 
+logging:
+  file:
+    # 项目自身输出日志，部署时可通过 APP_LOG_FILE 指向服务器日志目录。
+    name: ${APP_LOG_FILE:logs/geoserve-init.log}
+  level:
+    com.geoserve.init: ${APP_LOG_LEVEL:INFO}
+
 geoserver:
   # GeoServer 根地址。代码会在该地址后拼接 /rest/* 和 /gwc/rest/*。
   base-url: ${GEOSERVER_BASE_URL:http://localhost:8080/geoserver}
@@ -13,6 +20,34 @@ geoserver:
   init:
     # false 表示只在调用 POST /api/geoserver/init 时执行初始化。
     run-on-startup: ${GEOSERVER_INIT_RUN_ON_STARTUP:false}
+
+  deploy:
+    # true 表示当前 Java 服务负责在本机解压并启动 GeoServer。
+    enabled: ${GEOSERVER_DEPLOY_ENABLED:false}
+    # A/B 节点标识，只用于日志区分。
+    node-name: ${GEOSERVER_DEPLOY_NODE_NAME:local}
+    # GeoServer ZIP 包可以放在 src/main/resources/geoserver/ 下，构建时打入应用包。
+    archive-location: ${GEOSERVER_DEPLOY_ARCHIVE_LOCATION:classpath:geoserver/geoserver-bin.zip}
+    # work-dir 是托管部署根目录；install-dir 是每次解压出的运行目录。
+    work-dir: ${GEOSERVER_DEPLOY_WORK_DIR:runtime/geoserver}
+    install-dir: ${GEOSERVER_DEPLOY_INSTALL_DIR:runtime/geoserver/install}
+    # 停止项目时只删除 install-dir，不删除 data/cache/log 目录。
+    delete-install-on-stop: ${GEOSERVER_DEPLOY_DELETE_INSTALL_ON_STOP:true}
+    # GeoServer data directory，A/B 节点建议分别配置独立目录。
+    data-dir: ${GEOSERVER_DEPLOY_DATA_DIR:runtime/geoserver/data}
+    # GeoWebCache 切片目录，可指向 A/B 共同可访问的共享盘。
+    cache-dir: ${GEOSERVER_DEPLOY_CACHE_DIR:runtime/geoserver/gwc-cache}
+    log-dir: ${GEOSERVER_DEPLOY_LOG_DIR:logs/geoserver}
+    log-location: ${GEOSERVER_DEPLOY_LOG_LOCATION:logs/geoserver/geoserver.log}
+    java-home: ${GEOSERVER_DEPLOY_JAVA_HOME:}
+    port: ${GEOSERVER_DEPLOY_PORT:8080}
+    context-path: ${GEOSERVER_DEPLOY_CONTEXT_PATH:/geoserver}
+    startup-timeout-seconds: ${GEOSERVER_DEPLOY_STARTUP_TIMEOUT_SECONDS:120}
+    shutdown-timeout-seconds: ${GEOSERVER_DEPLOY_SHUTDOWN_TIMEOUT_SECONDS:30}
+    startup-script: ${GEOSERVER_DEPLOY_STARTUP_SCRIPT:bin/startup.sh}
+    shutdown-script: ${GEOSERVER_DEPLOY_SHUTDOWN_SCRIPT:bin/shutdown.sh}
+    require-file: ${GEOSERVER_DEPLOY_REQUIRE_FILE:}
+    jvm-args: []
 
   # 步骤 1：创建缺失的 site_selection workspace。
   # 步骤 2：上传 SLD 文件，创建工作区内样式。
