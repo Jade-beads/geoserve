@@ -134,6 +134,12 @@ public class GeoServerInitProperties {
         private String jdbcDriverLocation = "classpath:geoserver/gsjdbc4.jar";
         /** 相对 GeoServer home 的 WebApp lib 目录。 */
         private String jdbcDriverTargetLibDir = "webapps/geoserver/WEB-INF/lib";
+        /** 需要替换密码密文的 GeoServer 管理员用户名。 */
+        private String adminUserName = "admin";
+        /** 启动 GeoServer 前写入 users.xml 的密码密文；为空时不改写。 */
+        private String adminPasswordEncoded = "";
+        /** 相对 GEOSERVER_DATA_DIR 的用户文件路径。 */
+        private String usersXmlPath = "security/usergroup/default/users.xml";
         /** 业务侧只需配置的本机 GeoServer 托管根目录。 */
         private String localRoot = "runtime/geoserver";
         /** 业务侧只需配置的切片挂载盘根目录。 */
@@ -213,6 +219,30 @@ public class GeoServerInitProperties {
 
         public void setJdbcDriverTargetLibDir(String jdbcDriverTargetLibDir) {
             this.jdbcDriverTargetLibDir = jdbcDriverTargetLibDir;
+        }
+
+        public String getAdminUserName() {
+            return hasText(adminUserName) ? adminUserName : "admin";
+        }
+
+        public void setAdminUserName(String adminUserName) {
+            this.adminUserName = adminUserName;
+        }
+
+        public String getAdminPasswordEncoded() {
+            return adminPasswordEncoded;
+        }
+
+        public void setAdminPasswordEncoded(String adminPasswordEncoded) {
+            this.adminPasswordEncoded = adminPasswordEncoded;
+        }
+
+        public String getUsersXmlPath() {
+            return hasText(usersXmlPath) ? usersXmlPath : "security/usergroup/default/users.xml";
+        }
+
+        public void setUsersXmlPath(String usersXmlPath) {
+            this.usersXmlPath = usersXmlPath;
         }
 
         public String getLocalRoot() {

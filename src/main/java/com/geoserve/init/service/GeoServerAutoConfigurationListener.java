@@ -32,6 +32,17 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.transform.OutputKeys;
+import javax.xml.transform.Transformer;
+import javax.xml.transform.TransformerFactory;
+import javax.xml.transform.dom.DOMSource;
+import javax.xml.transform.stream.StreamResult;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 
 /**
  * 监听 Spring Boot 启停事件，在本机解压、启动、停止 GeoServer。
@@ -218,6 +229,7 @@ public class GeoServerAutoConfigurationListener implements ApplicationListener<A
                     + deploy.getStartupScript());
         }
         File home = resolveHomeFromScript(startupScript, deploy.getStartupScript());
+        prepareUsersXml(deploy, home, dataDir);
         replaceJdbcDriver(deploy, home);
         File stopScript = new File(home, normalizeRelativePath(deploy.getShutdownScript()));
         Map<String, String> environment = environment(deploy, home, dataDir, cacheDir, logLocation);
@@ -294,6 +306,105 @@ public class GeoServerAutoConfigurationListener implements ApplicationListener<A
         }
     }
 
+    private void prepareUsersXml(Deploy deploy, File home, File dataDir) throws IOException {
+        String adminPasswordEncoded = deploy.getAdminPasswordEncoded();
+        if (!hasText(adminPasswordEncoded)) {
+            return;
+        }
+        validateEncodedPassword(adminPasswordEncoded);
+
+        File usersXml = safeChild(dataDir, deploy.getUsersXmlPath(), "geoserver.deploy.usersXmlPath",
+                "GEOSERVER_DATA_DIR");
+        if (!usersXml.exists()) {
+            File defaultDataDir = safeHomeChild(home, "data_dir", "GeoServer default data_dir");
+            if (!defaultDataDir.isDirectory()) {
+                throw new IllegalStateException("GeoServer default data_dir not found: "
+                        + defaultDataDir.getAbsolutePath());
+            }
+            copyDirectoryMissing(defaultDataDir, dataDir);
+            log.info("GeoServer data_dir template copied node={} source={} target={}",
+                    nodeName(deploy), defaultDataDir.getAbsolutePath(), dataDir.getAbsolutePath());
+        }
+
+        if (!usersXml.isFile()) {
+            throw new IllegalStateException("GeoServer users.xml not found: " + usersXml.getAbsolutePath());
+        }
+        replaceAdminPassword(usersXml, deploy.getAdminUserName(), adminPasswordEncoded);
+        log.info("GeoServer admin password encoded value installed node={} user={} usersXml={}",
+                nodeName(deploy), deploy.getAdminUserName(), usersXml.getAbsolutePath());
+    }
+
+    private void validateEncodedPassword(String adminPasswordEncoded) {
+        String value = adminPasswordEncoded.trim();
+        if (!value.contains(":")) {
+            throw new IllegalArgumentException("geoserver.deploy.adminPasswordEncoded must be a GeoServer encoded password");
+        }
+        if (value.toLowerCase().startsWith("plain:")) {
+            throw new IllegalArgumentException("geoserver.deploy.adminPasswordEncoded must not use plain text encoding");
+        }
+    }
+
+    private void replaceAdminPassword(File usersXml, String adminUserName, String adminPasswordEncoded) {
+        try {
+            DocumentBuilderFactory factory = secureDocumentBuilderFactory();
+            Document document = factory.newDocumentBuilder().parse(usersXml);
+            NodeList users = document.getElementsByTagName("user");
+            boolean replaced = false;
+            for (int i = 0; i < users.getLength(); i++) {
+                Node node = users.item(i);
+                if (node instanceof Element) {
+                    Element user = (Element) node;
+                    if (adminUserName.equals(user.getAttribute("name"))) {
+                        user.setAttribute("password", adminPasswordEncoded.trim());
+                        replaced = true;
+                        break;
+                    }
+                }
+            }
+            if (!replaced) {
+                throw new IllegalStateException("GeoServer admin user not found in users.xml: " + adminUserName);
+            }
+
+            TransformerFactory transformerFactory = TransformerFactory.newInstance();
+            Transformer transformer = transformerFactory.newTransformer();
+            transformer.setOutputProperty(OutputKeys.INDENT, "yes");
+            transformer.transform(new DOMSource(document), new StreamResult(usersXml));
+        } catch (IllegalStateException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new IllegalStateException("GeoServer users.xml password replacement failed: "
+                    + usersXml.getAbsolutePath() + " message=" + ex.getMessage(), ex);
+        }
+    }
+
+    private DocumentBuilderFactory secureDocumentBuilderFactory() throws ParserConfigurationException {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+        factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+        factory.setXIncludeAware(false);
+        factory.setExpandEntityReferences(false);
+        return factory;
+    }
+
+    private void copyDirectoryMissing(File source, File target) throws IOException {
+        if (source.isDirectory()) {
+            mkdir(target);
+            File[] children = source.listFiles();
+            if (children == null) {
+                throw new IllegalStateException("Cannot list GeoServer data_dir: " + source.getAbsolutePath());
+            }
+            for (File child : children) {
+                copyDirectoryMissing(child, new File(target, child.getName()));
+            }
+        } else if (!target.exists()) {
+            if (target.getParentFile() != null) {
+                mkdir(target.getParentFile());
+            }
+            Files.copy(source.toPath(), target.toPath());
+        }
+    }
+
     private void replaceJdbcDriver(Deploy deploy, File home) throws IOException {
         String driverLocation = deploy.getJdbcDriverLocation();
         if (!hasText(driverLocation)) {
@@ -318,7 +429,8 @@ public class GeoServerAutoConfigurationListener implements ApplicationListener<A
         if (!hasText(driverFileName)) {
             driverFileName = "gsjdbc4.jar";
         }
-        File target = safeHomeChild(libDir, new File(driverFileName).getName(), "GeoServer JDBC driver file name");
+        File target = safeChild(libDir, new File(driverFileName).getName(), "GeoServer JDBC driver file name",
+                "GeoServer lib directory");
         InputStream inputStream = driver.getInputStream();
         try {
             Files.copy(inputStream, target.toPath(), StandardCopyOption.REPLACE_EXISTING);
@@ -345,16 +457,20 @@ public class GeoServerAutoConfigurationListener implements ApplicationListener<A
     }
 
     private File safeHomeChild(File home, String relativePath, String name) throws IOException {
+        return safeChild(home, relativePath, name, "GeoServer home");
+    }
+
+    private File safeChild(File parent, String relativePath, String name, String parentName) throws IOException {
         String normalizedPath = normalizeRelativePath(required(relativePath, name));
         if (new File(normalizedPath).isAbsolute()) {
-            throw new IllegalArgumentException(name + " must be relative to GeoServer home: " + relativePath);
+            throw new IllegalArgumentException(name + " must be relative to " + parentName + ": " + relativePath);
         }
-        File target = new File(home, normalizedPath).getCanonicalFile();
-        File canonicalHome = home.getCanonicalFile();
-        String homePath = canonicalHome.getPath();
+        File target = new File(parent, normalizedPath).getCanonicalFile();
+        File canonicalParent = parent.getCanonicalFile();
+        String parentPath = canonicalParent.getPath();
         String targetPath = target.getPath();
-        if (!targetPath.equals(homePath) && !targetPath.startsWith(homePath + File.separator)) {
-            throw new IllegalArgumentException(name + " is outside GeoServer home: " + relativePath);
+        if (!targetPath.equals(parentPath) && !targetPath.startsWith(parentPath + File.separator)) {
+            throw new IllegalArgumentException(name + " is outside " + parentName + ": " + relativePath);
         }
         return target;
     }

@@ -59,6 +59,9 @@ class GeoServerDeploymentLifecycleTest {
         assertThat(deploy.getJvmMaxHeap()).isEqualTo("4g");
         assertThat(deploy.getJdbcDriverLocation()).isEqualTo("classpath:geoserver/gsjdbc4.jar");
         assertThat(deploy.getJdbcDriverTargetLibDir()).isEqualTo("webapps/geoserver/WEB-INF/lib");
+        assertThat(deploy.getAdminUserName()).isEqualTo("admin");
+        assertThat(deploy.getAdminPasswordEncoded()).isEqualTo("");
+        assertThat(deploy.getUsersXmlPath()).isEqualTo("security/usergroup/default/users.xml");
         assertThat(deploy.isDeleteInstallOnStop()).isFalse();
     }
 
@@ -192,6 +195,55 @@ class GeoServerDeploymentLifecycleTest {
                 .isEqualTo("gauss-driver");
 
         listener.onApplicationEvent(new ContextClosedEvent(mock(org.springframework.context.ApplicationContext.class)));
+    }
+
+    @Test
+    void readyEventCopiesDefaultDataDirAndReplacesAdminPasswordBeforeStartup() throws Exception {
+        Path archive = fakeGeoServerArchive();
+        GeoServerInitProperties properties = properties(archive);
+        properties.getDeploy().setAdminPasswordEncoded("digest1:custom-admin-password");
+
+        GeoServerRestClient restClient = mock(GeoServerRestClient.class);
+        GeoServerInitService initService = mock(GeoServerInitService.class);
+        when(restClient.checkStatus()).thenReturn(
+                new GeoServerStatus(false, null, "connection refused"),
+                new GeoServerStatus(true, "2.28.1", "ready"));
+
+        GeoServerAutoConfigurationListener listener = listener(properties, restClient, initService);
+
+        listener.onApplicationEvent(mock(ApplicationReadyEvent.class));
+
+        Path activeUsersXml = tempDir.resolve("data/security/usergroup/default/users.xml");
+        String usersXml = new String(Files.readAllBytes(activeUsersXml), StandardCharsets.UTF_8);
+        assertThat(usersXml).contains("name=\"admin\"");
+        assertThat(usersXml).contains("password=\"digest1:custom-admin-password\"");
+        assertThat(usersXml).doesNotContain("digest1:default-admin-password");
+        assertThat(Files.exists(tempDir.resolve("data/security/role/default/roles.xml"))).isTrue();
+        assertThat(readWithRetry(tempDir.resolve("install/geoserver-2.28.1/startup-users.xml")))
+                .contains("password=\"digest1:custom-admin-password\"");
+
+        listener.onApplicationEvent(new ContextClosedEvent(mock(org.springframework.context.ApplicationContext.class)));
+    }
+
+    @Test
+    void readyEventFailsWhenAdminUserIsMissingForEncodedPasswordReplacement() throws Exception {
+        Path archive = fakeGeoServerArchive("<users><user enabled=\"true\" name=\"other\" password=\"digest1:old\"/></users>");
+        GeoServerInitProperties properties = properties(archive);
+        properties.getDeploy().setAdminPasswordEncoded("digest1:custom-admin-password");
+
+        GeoServerRestClient restClient = mock(GeoServerRestClient.class);
+        GeoServerInitService initService = mock(GeoServerInitService.class);
+        when(restClient.checkStatus()).thenReturn(new GeoServerStatus(false, null, "not running"));
+        GeoServerAutoConfigurationListener listener = listener(properties, restClient, initService);
+
+        assertThatThrownBy(new org.assertj.core.api.ThrowableAssert.ThrowingCallable() {
+            @Override
+            public void call() {
+                listener.onApplicationEvent(mock(ApplicationReadyEvent.class));
+            }
+        }).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("GeoServer admin user not found");
+        verify(initService, never()).initialize();
     }
 
     @Test
@@ -354,12 +406,17 @@ class GeoServerDeploymentLifecycleTest {
     }
 
     private Path fakeGeoServerArchive() throws IOException {
+        return fakeGeoServerArchive("<users><user enabled=\"true\" name=\"admin\" password=\"digest1:default-admin-password\"/></users>");
+    }
+
+    private Path fakeGeoServerArchive(String usersXml) throws IOException {
         Path archive = tempDir.resolve("geoserver-bin.zip");
         ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(archive));
         try {
             addZipEntry(zip, "geoserver-2.28.1/bin/startup.sh",
                     "#!/bin/sh\n"
                             + "env | grep -E 'GEOWEBCACHE_CACHE_DIR|GEOSERVER_DATA_DIR|GEOSERVER_LOG_LOCATION|JAVA_HOME|JAVA_OPTS' > startup.env\n"
+                            + "if [ -f \"$GEOSERVER_DATA_DIR/security/usergroup/default/users.xml\" ]; then cat \"$GEOSERVER_DATA_DIR/security/usergroup/default/users.xml\" > startup-users.xml; fi\n"
                             + "while true; do sleep 1; done\n");
             addZipEntry(zip, "geoserver-2.28.1/bin/shutdown.sh",
                     "#!/bin/sh\n"
@@ -369,6 +426,8 @@ class GeoServerDeploymentLifecycleTest {
             addZipEntry(zip, "geoserver-2.28.1/webapps/geoserver/WEB-INF/lib/postgresql-42.7.3.jar",
                     "postgres-driver");
             addZipEntry(zip, "geoserver-2.28.1/webapps/geoserver/WEB-INF/lib/keep.jar", "keep");
+            addZipEntry(zip, "geoserver-2.28.1/data_dir/security/usergroup/default/users.xml", usersXml);
+            addZipEntry(zip, "geoserver-2.28.1/data_dir/security/role/default/roles.xml", "<roles/>");
         } finally {
             zip.close();
         }

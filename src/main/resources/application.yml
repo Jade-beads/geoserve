@@ -32,6 +32,11 @@ geoserver:
     jdbc-driver-location: ${GEOSERVER_DEPLOY_JDBC_DRIVER_LOCATION:classpath:geoserver/gsjdbc4.jar}
     # 相对 GeoServer home 的 WebApp lib 目录；复制 GaussDB 驱动前会删除 postgresql*.jar。
     jdbc-driver-target-lib-dir: ${GEOSERVER_DEPLOY_JDBC_DRIVER_TARGET_LIB_DIR:webapps/geoserver/WEB-INF/lib}
+    # 启动前替换 users.xml 中该用户的 password 密文；为空时不改写 users.xml。
+    admin-user-name: ${GEOSERVER_DEPLOY_ADMIN_USER_NAME:admin}
+    admin-password-encoded: ${GEOSERVER_DEPLOY_ADMIN_PASSWORD_ENCODED:}
+    # 相对 GEOSERVER_DATA_DIR 的用户文件路径。
+    users-xml-path: ${GEOSERVER_DEPLOY_USERS_XML_PATH:security/usergroup/default/users.xml}
     # 业务侧推荐只配置 local-root 和 tile-root，其他目录默认从这两个根路径派生。
     local-root: ${GEOSERVER_DEPLOY_LOCAL_ROOT:runtime/geoserver}
     tile-root: ${GEOSERVER_DEPLOY_TILE_ROOT:runtime/geoserver/gwc-cache}

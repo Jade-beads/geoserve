@@ -194,6 +194,9 @@ class GeoServerSqlResourceTest {
         assertThat(yaml).contains("jvm-max-heap: ${GEOSERVER_DEPLOY_JVM_MAX_HEAP:4g}");
         assertThat(yaml).contains("jdbc-driver-location: ${GEOSERVER_DEPLOY_JDBC_DRIVER_LOCATION:classpath:geoserver/gsjdbc4.jar}");
         assertThat(yaml).contains("jdbc-driver-target-lib-dir: ${GEOSERVER_DEPLOY_JDBC_DRIVER_TARGET_LIB_DIR:webapps/geoserver/WEB-INF/lib}");
+        assertThat(yaml).contains("admin-user-name: ${GEOSERVER_DEPLOY_ADMIN_USER_NAME:admin}");
+        assertThat(yaml).contains("admin-password-encoded: ${GEOSERVER_DEPLOY_ADMIN_PASSWORD_ENCODED:}");
+        assertThat(yaml).contains("users-xml-path: ${GEOSERVER_DEPLOY_USERS_XML_PATH:security/usergroup/default/users.xml}");
         assertThat(yaml).contains("startup-timeout-seconds: ${GEOSERVER_DEPLOY_STARTUP_TIMEOUT_SECONDS:120}");
     }
 
@@ -219,6 +222,9 @@ class GeoServerSqlResourceTest {
         assertThat(readme).contains("gsjdbc4.jar");
         assertThat(readme).contains("postgresql*.jar");
         assertThat(readme).contains("GEOSERVER_DEPLOY_JDBC_DRIVER_LOCATION");
+        assertThat(readme).contains("GEOSERVER_DEPLOY_ADMIN_PASSWORD_ENCODED");
+        assertThat(readme).contains("security/usergroup/default/users.xml");
+        assertThat(readme).contains("启动前替换");
         assertThat(readme).contains("/geoserver/192_168_0_1_gwc");
         assertThat(readme).contains("启动脚本执行前注入到 `GEOWEBCACHE_CACHE_DIR`");
         assertThat(readme).contains("需要在项目启动前配置");
