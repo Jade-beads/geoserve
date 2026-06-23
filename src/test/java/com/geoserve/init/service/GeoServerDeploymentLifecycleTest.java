@@ -57,6 +57,8 @@ class GeoServerDeploymentLifecycleTest {
         assertThat(deploy.getLogDir()).isEqualTo("runtime/geoserver/logs");
         assertThat(deploy.getLogLocation()).isEqualTo("runtime/geoserver/logs/geoserver.log");
         assertThat(deploy.getJvmMaxHeap()).isEqualTo("4g");
+        assertThat(deploy.getJdbcDriverLocation()).isEqualTo("classpath:geoserver/gsjdbc4.jar");
+        assertThat(deploy.getJdbcDriverTargetLibDir()).isEqualTo("webapps/geoserver/WEB-INF/lib");
         assertThat(deploy.isDeleteInstallOnStop()).isFalse();
     }
 
@@ -163,6 +165,54 @@ class GeoServerDeploymentLifecycleTest {
                 .contains("GEOWEBCACHE_CACHE_DIR=" + tempDir.resolve("cache/192_168_0_1_gwc"));
 
         listener.onApplicationEvent(new ContextClosedEvent(mock(org.springframework.context.ApplicationContext.class)));
+    }
+
+    @Test
+    void readyEventReplacesPostgresqlDriverWithGaussDriverBeforeStartup() throws Exception {
+        Path archive = fakeGeoServerArchive();
+        Path gaussDriver = tempDir.resolve("gsjdbc4.jar");
+        Files.write(gaussDriver, "gauss-driver".getBytes(StandardCharsets.UTF_8));
+        GeoServerInitProperties properties = properties(archive);
+        properties.getDeploy().setJdbcDriverLocation(gaussDriver.toUri().toString());
+
+        GeoServerRestClient restClient = mock(GeoServerRestClient.class);
+        GeoServerInitService initService = mock(GeoServerInitService.class);
+        when(restClient.checkStatus()).thenReturn(
+                new GeoServerStatus(false, null, "connection refused"),
+                new GeoServerStatus(true, "2.28.1", "ready"));
+
+        GeoServerAutoConfigurationListener listener = listener(properties, restClient, initService);
+
+        listener.onApplicationEvent(mock(ApplicationReadyEvent.class));
+
+        Path lib = tempDir.resolve("install/geoserver-2.28.1/webapps/geoserver/WEB-INF/lib");
+        assertThat(Files.exists(lib.resolve("postgresql-42.7.3.jar"))).isFalse();
+        assertThat(Files.exists(lib.resolve("keep.jar"))).isTrue();
+        assertThat(new String(Files.readAllBytes(lib.resolve("gsjdbc4.jar")), StandardCharsets.UTF_8))
+                .isEqualTo("gauss-driver");
+
+        listener.onApplicationEvent(new ContextClosedEvent(mock(org.springframework.context.ApplicationContext.class)));
+    }
+
+    @Test
+    void readyEventFailsWhenConfiguredGaussDriverJarIsMissing() throws Exception {
+        Path archive = fakeGeoServerArchive();
+        GeoServerInitProperties properties = properties(archive);
+        properties.getDeploy().setJdbcDriverLocation(tempDir.resolve("missing-gsjdbc4.jar").toUri().toString());
+
+        GeoServerRestClient restClient = mock(GeoServerRestClient.class);
+        GeoServerInitService initService = mock(GeoServerInitService.class);
+        when(restClient.checkStatus()).thenReturn(new GeoServerStatus(false, null, "not running"));
+        GeoServerAutoConfigurationListener listener = listener(properties, restClient, initService);
+
+        assertThatThrownBy(new org.assertj.core.api.ThrowableAssert.ThrowingCallable() {
+            @Override
+            public void call() {
+                listener.onApplicationEvent(mock(ApplicationReadyEvent.class));
+            }
+        }).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("GeoServer JDBC driver not found");
+        verify(initService, never()).initialize();
     }
 
     @Test
@@ -292,6 +342,7 @@ class GeoServerDeploymentLifecycleTest {
         deploy.setPort(18080);
         deploy.setStartupTimeoutSeconds(2);
         deploy.setShutdownTimeoutSeconds(2);
+        deploy.setJdbcDriverLocation("");
 
         GeoServerInitProperties properties = new GeoServerInitProperties();
         properties.setBaseUrl("http://localhost:18080/geoserver");
@@ -315,6 +366,9 @@ class GeoServerDeploymentLifecycleTest {
                             + "echo stop > shutdown.env\n");
             addZipEntry(zip, "geoserver-2.28.1/conf/existing.txt", "archive-existing");
             addZipEntry(zip, "geoserver-2.28.1/conf/missing.txt", "archive-missing");
+            addZipEntry(zip, "geoserver-2.28.1/webapps/geoserver/WEB-INF/lib/postgresql-42.7.3.jar",
+                    "postgres-driver");
+            addZipEntry(zip, "geoserver-2.28.1/webapps/geoserver/WEB-INF/lib/keep.jar", "keep");
         } finally {
             zip.close();
         }

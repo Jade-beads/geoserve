@@ -24,6 +24,7 @@ import java.net.InetAddress;
 import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -217,6 +218,7 @@ public class GeoServerAutoConfigurationListener implements ApplicationListener<A
                     + deploy.getStartupScript());
         }
         File home = resolveHomeFromScript(startupScript, deploy.getStartupScript());
+        replaceJdbcDriver(deploy, home);
         File stopScript = new File(home, normalizeRelativePath(deploy.getShutdownScript()));
         Map<String, String> environment = environment(deploy, home, dataDir, cacheDir, logLocation);
 
@@ -290,6 +292,71 @@ public class GeoServerAutoConfigurationListener implements ApplicationListener<A
         } finally {
             zip.close();
         }
+    }
+
+    private void replaceJdbcDriver(Deploy deploy, File home) throws IOException {
+        String driverLocation = deploy.getJdbcDriverLocation();
+        if (!hasText(driverLocation)) {
+            log.info("GeoServer JDBC driver replacement skipped node={} because jdbc-driver-location is empty",
+                    nodeName(deploy));
+            return;
+        }
+
+        File libDir = safeHomeChild(home, deploy.getJdbcDriverTargetLibDir(),
+                "geoserver.deploy.jdbcDriverTargetLibDir");
+        if (!libDir.isDirectory()) {
+            throw new IllegalStateException("GeoServer lib directory not found: " + libDir.getAbsolutePath());
+        }
+
+        Resource driver = resourceLoader.getResource(driverLocation);
+        if (!driver.exists()) {
+            throw new IllegalStateException("GeoServer JDBC driver not found: " + driverLocation);
+        }
+
+        deletePostgresqlDrivers(deploy, libDir);
+        String driverFileName = driver.getFilename();
+        if (!hasText(driverFileName)) {
+            driverFileName = "gsjdbc4.jar";
+        }
+        File target = safeHomeChild(libDir, new File(driverFileName).getName(), "GeoServer JDBC driver file name");
+        InputStream inputStream = driver.getInputStream();
+        try {
+            Files.copy(inputStream, target.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            inputStream.close();
+        }
+        log.info("GeoServer JDBC driver installed node={} source={} target={}",
+                nodeName(deploy), driverLocation, target.getAbsolutePath());
+    }
+
+    private void deletePostgresqlDrivers(Deploy deploy, File libDir) throws IOException {
+        File[] files = libDir.listFiles();
+        if (files == null) {
+            throw new IllegalStateException("Cannot list GeoServer lib directory: " + libDir.getAbsolutePath());
+        }
+        for (File file : files) {
+            String name = file.getName().toLowerCase();
+            if (file.isFile() && name.startsWith("postgresql") && name.endsWith(".jar")) {
+                Files.delete(file.toPath());
+                log.info("GeoServer PostgreSQL JDBC driver removed node={} file={}",
+                        nodeName(deploy), file.getAbsolutePath());
+            }
+        }
+    }
+
+    private File safeHomeChild(File home, String relativePath, String name) throws IOException {
+        String normalizedPath = normalizeRelativePath(required(relativePath, name));
+        if (new File(normalizedPath).isAbsolute()) {
+            throw new IllegalArgumentException(name + " must be relative to GeoServer home: " + relativePath);
+        }
+        File target = new File(home, normalizedPath).getCanonicalFile();
+        File canonicalHome = home.getCanonicalFile();
+        String homePath = canonicalHome.getPath();
+        String targetPath = target.getPath();
+        if (!targetPath.equals(homePath) && !targetPath.startsWith(homePath + File.separator)) {
+            throw new IllegalArgumentException(name + " is outside GeoServer home: " + relativePath);
+        }
+        return target;
     }
 
     private File safeZipTarget(File installDir, ZipEntry entry) throws IOException {

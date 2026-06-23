@@ -130,6 +130,10 @@ public class GeoServerInitProperties {
         private String nodeName = "local";
         /** classpath 或 file 资源位置，默认由部署包提供本地 GeoServer ZIP。 */
         private String archiveLocation = "classpath:geoserver/geoserver-bin.zip";
+        /** GaussDB JDBC 驱动位置，启动 GeoServer 前复制到 GeoServer WebApp lib。 */
+        private String jdbcDriverLocation = "classpath:geoserver/gsjdbc4.jar";
+        /** 相对 GeoServer home 的 WebApp lib 目录。 */
+        private String jdbcDriverTargetLibDir = "webapps/geoserver/WEB-INF/lib";
         /** 业务侧只需配置的本机 GeoServer 托管根目录。 */
         private String localRoot = "runtime/geoserver";
         /** 业务侧只需配置的切片挂载盘根目录。 */
@@ -193,6 +197,22 @@ public class GeoServerInitProperties {
 
         public void setArchiveLocation(String archiveLocation) {
             this.archiveLocation = archiveLocation;
+        }
+
+        public String getJdbcDriverLocation() {
+            return jdbcDriverLocation;
+        }
+
+        public void setJdbcDriverLocation(String jdbcDriverLocation) {
+            this.jdbcDriverLocation = jdbcDriverLocation;
+        }
+
+        public String getJdbcDriverTargetLibDir() {
+            return hasText(jdbcDriverTargetLibDir) ? jdbcDriverTargetLibDir : "webapps/geoserver/WEB-INF/lib";
+        }
+
+        public void setJdbcDriverTargetLibDir(String jdbcDriverTargetLibDir) {
+            this.jdbcDriverTargetLibDir = jdbcDriverTargetLibDir;
         }
 
         public String getLocalRoot() {

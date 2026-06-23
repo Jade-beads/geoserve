@@ -167,7 +167,15 @@ GeoServer 有 JMS Cluster 方案，但它主要用于配置同步，不负责业
 src/main/resources/geoserver/geoserver-bin.zip
 ```
 
-该目录保留了 `.gitkeep`，真实 ZIP 包已在 `.gitignore` 中忽略，不会提交到 GitHub。当前实现只解压 ZIP 包；压缩包内需要包含 `bin/startup.sh` 和 `bin/shutdown.sh`。
+把 GaussDB JDBC 驱动包放到：
+
+```text
+src/main/resources/geoserver/gsjdbc4.jar
+```
+
+该目录保留了 `.gitkeep`，真实 ZIP 包和 JAR 包已在 `.gitignore` 中忽略，不会提交到 GitHub。当前实现只解压 ZIP 包；压缩包内需要包含 `bin/startup.sh`、`bin/shutdown.sh` 和 `webapps/geoserver/WEB-INF/lib`。
+
+GaussDB 连接需要替换 GeoServer WebApp 内的 PostgreSQL JDBC 驱动。托管启动时会在启动 GeoServer 前进入 `webapps/geoserver/WEB-INF/lib`，删除已有 `postgresql*.jar`，再复制 `gsjdbc4.jar`。如果 `gsjdbc4.jar` 缺失，或目标 lib 目录不存在，应用会启动失败并输出明确错误。
 
 ### 启动流程
 
@@ -176,10 +184,11 @@ src/main/resources/geoserver/geoserver-bin.zip
 1. 创建 `work-dir`、`install-dir`、`data-dir`、实际 GWC 切片目录、`log-dir`。
 2. 如果当前 GeoServer 已在运行，先执行和停止项目一致的停止流程。
 3. 保留已有 `install-dir`，重新解压 GeoServer ZIP 时只补齐缺失文件，已存在文件不会覆盖。
-4. 设置 `GEOSERVER_DATA_DIR`、`GEOWEBCACHE_CACHE_DIR`、`GEOSERVER_LOG_LOCATION`、`JAVA_HOME`、`JAVA_OPTS`。
-5. 执行 GeoServer `bin/startup.sh`。
-6. 轮询 `GET /rest/about/version`，等待 GeoServer 可用。
-7. 如果 `GEOSERVER_INIT_RUN_ON_STARTUP=true`，再执行 workspace、style、datastore、layer、GWC 初始化。
+4. 替换 GeoServer JDBC 驱动：删除 `postgresql*.jar`，复制 `gsjdbc4.jar`。
+5. 设置 `GEOSERVER_DATA_DIR`、`GEOWEBCACHE_CACHE_DIR`、`GEOSERVER_LOG_LOCATION`、`JAVA_HOME`、`JAVA_OPTS`。
+6. 执行 GeoServer `bin/startup.sh`。
+7. 轮询 `GET /rest/about/version`，等待 GeoServer 可用。
+8. 如果 `GEOSERVER_INIT_RUN_ON_STARTUP=true`，再执行 workspace、style、datastore、layer、GWC 初始化。
 
 停止项目时，应用会优先执行 `bin/shutdown.sh`，再销毁子进程。默认只停止 GeoServer，不删除 `install-dir`，也不会删除 `data-dir`、实际 GWC 切片目录、`log-dir`。如确实需要恢复旧行为，可以显式设置 `GEOSERVER_DEPLOY_DELETE_INSTALL_ON_STOP=true`。
 
@@ -211,6 +220,8 @@ export GEOSERVER_DEPLOY_TILE_ROOT=/geoserver
 | `GEOSERVER_DEPLOY_ENABLED` | 是否启用本机托管 GeoServer | `false` |
 | `GEOSERVER_DEPLOY_NODE_NAME` | 当前节点名，用于日志区分 | `local` |
 | `GEOSERVER_DEPLOY_ARCHIVE_LOCATION` | GeoServer ZIP 包位置 | `classpath:geoserver/geoserver-bin.zip` |
+| `GEOSERVER_DEPLOY_JDBC_DRIVER_LOCATION` | GaussDB JDBC 驱动包位置 | `classpath:geoserver/gsjdbc4.jar` |
+| `GEOSERVER_DEPLOY_JDBC_DRIVER_TARGET_LIB_DIR` | 相对 GeoServer home 的 WebApp lib 目录 | `webapps/geoserver/WEB-INF/lib` |
 | `GEOSERVER_DEPLOY_LOCAL_ROOT` | 本机 GeoServer 托管根目录，推荐业务只改这个本机路径 | `runtime/geoserver` |
 | `GEOSERVER_DEPLOY_TILE_ROOT` | GWC 切片挂载盘根目录，推荐业务只改这个挂载盘路径 | `runtime/geoserver/gwc-cache` |
 | `GEOSERVER_DEPLOY_WORK_DIR` | 托管部署根目录；未配置时读取 `local-root` | `runtime/geoserver` |

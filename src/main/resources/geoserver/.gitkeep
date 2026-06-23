@@ -1,1 +1,1 @@
-# 本目录用于本地放置 GeoServer ZIP 包，实际压缩包已在 .gitignore 中忽略。
+# 本目录用于本地放置 GeoServer ZIP 包和 GaussDB JDBC 驱动包，实际压缩包和 JAR 已在 .gitignore 中忽略。

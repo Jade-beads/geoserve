@@ -192,6 +192,8 @@ class GeoServerSqlResourceTest {
         assertThat(yaml).contains("cache-dir-per-host-enabled: ${GEOSERVER_DEPLOY_CACHE_DIR_PER_HOST_ENABLED:true}");
         assertThat(yaml).contains("log-location: ${GEOSERVER_DEPLOY_LOG_LOCATION:${geoserver.deploy.local-root}/logs/geoserver.log}");
         assertThat(yaml).contains("jvm-max-heap: ${GEOSERVER_DEPLOY_JVM_MAX_HEAP:4g}");
+        assertThat(yaml).contains("jdbc-driver-location: ${GEOSERVER_DEPLOY_JDBC_DRIVER_LOCATION:classpath:geoserver/gsjdbc4.jar}");
+        assertThat(yaml).contains("jdbc-driver-target-lib-dir: ${GEOSERVER_DEPLOY_JDBC_DRIVER_TARGET_LIB_DIR:webapps/geoserver/WEB-INF/lib}");
         assertThat(yaml).contains("startup-timeout-seconds: ${GEOSERVER_DEPLOY_STARTUP_TIMEOUT_SECONDS:120}");
     }
 
@@ -200,8 +202,9 @@ class GeoServerSqlResourceTest {
         String gitignore = readFile(".gitignore");
 
         assertThat(gitignore).contains("src/main/resources/geoserver/*.zip");
+        assertThat(gitignore).contains("src/main/resources/geoserver/*.jar");
         assertThat(readFile("src/main/resources/geoserver/.gitkeep"))
-                .contains("本目录用于本地放置 GeoServer ZIP 包");
+                .contains("本目录用于本地放置 GeoServer ZIP 包和 GaussDB JDBC 驱动包");
     }
 
     @Test
@@ -213,6 +216,9 @@ class GeoServerSqlResourceTest {
         assertThat(readme).contains("GEOSERVER_DEPLOY_TILE_ROOT=/geoserver");
         assertThat(readme).contains("业务项目只需要改两个路径和账号密码");
         assertThat(readme).contains("默认会给 GeoServer 子进程追加 `-Xmx4g`");
+        assertThat(readme).contains("gsjdbc4.jar");
+        assertThat(readme).contains("postgresql*.jar");
+        assertThat(readme).contains("GEOSERVER_DEPLOY_JDBC_DRIVER_LOCATION");
         assertThat(readme).contains("/geoserver/192_168_0_1_gwc");
         assertThat(readme).contains("启动脚本执行前注入到 `GEOWEBCACHE_CACHE_DIR`");
         assertThat(readme).contains("需要在项目启动前配置");
