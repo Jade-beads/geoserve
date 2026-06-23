@@ -47,13 +47,51 @@ class GeoServerDeploymentLifecycleTest {
 
         assertThat(deploy.isEnabled()).isFalse();
         assertThat(deploy.getArchiveLocation()).isEqualTo("classpath:geoserver/geoserver-bin.zip");
+        assertThat(deploy.getLocalRoot()).isEqualTo("runtime/geoserver");
+        assertThat(deploy.getTileRoot()).isEqualTo("runtime/geoserver/gwc-cache");
         assertThat(deploy.getWorkDir()).isEqualTo("runtime/geoserver");
         assertThat(deploy.getInstallDir()).isEqualTo("runtime/geoserver/install");
         assertThat(deploy.getDataDir()).isEqualTo("runtime/geoserver/data");
         assertThat(deploy.getCacheDir()).isEqualTo("runtime/geoserver/gwc-cache");
         assertThat(deploy.isCacheDirPerHostEnabled()).isTrue();
-        assertThat(deploy.getLogDir()).isEqualTo("logs/geoserver");
+        assertThat(deploy.getLogDir()).isEqualTo("runtime/geoserver/logs");
+        assertThat(deploy.getLogLocation()).isEqualTo("runtime/geoserver/logs/geoserver.log");
+        assertThat(deploy.getJvmMaxHeap()).isEqualTo("4g");
         assertThat(deploy.isDeleteInstallOnStop()).isFalse();
+    }
+
+    @Test
+    void deployPathsAreDerivedFromLocalRootAndTileRootWhenSpecificPathsAreNotConfigured() {
+        Deploy deploy = new Deploy();
+        deploy.setLocalRoot("/opt/geoserve/geoserver");
+        deploy.setTileRoot("/geoserver");
+
+        assertThat(deploy.getWorkDir()).isEqualTo("/opt/geoserve/geoserver");
+        assertThat(deploy.getInstallDir()).isEqualTo("/opt/geoserve/geoserver/install");
+        assertThat(deploy.getDataDir()).isEqualTo("/opt/geoserve/geoserver/data");
+        assertThat(deploy.getLogDir()).isEqualTo("/opt/geoserve/geoserver/logs");
+        assertThat(deploy.getLogLocation()).isEqualTo("/opt/geoserve/geoserver/logs/geoserver.log");
+        assertThat(deploy.getCacheDir()).isEqualTo("/geoserver");
+    }
+
+    @Test
+    void explicitLegacyDeployPathsStillOverrideDerivedRoots() {
+        Deploy deploy = new Deploy();
+        deploy.setLocalRoot("/opt/geoserve/geoserver");
+        deploy.setTileRoot("/geoserver");
+        deploy.setWorkDir("/custom/work");
+        deploy.setInstallDir("/custom/install");
+        deploy.setDataDir("/custom/data");
+        deploy.setCacheDir("/custom/cache");
+        deploy.setLogDir("/custom/logs");
+        deploy.setLogLocation("/custom/logs/geoserver.log");
+
+        assertThat(deploy.getWorkDir()).isEqualTo("/custom/work");
+        assertThat(deploy.getInstallDir()).isEqualTo("/custom/install");
+        assertThat(deploy.getDataDir()).isEqualTo("/custom/data");
+        assertThat(deploy.getCacheDir()).isEqualTo("/custom/cache");
+        assertThat(deploy.getLogDir()).isEqualTo("/custom/logs");
+        assertThat(deploy.getLogLocation()).isEqualTo("/custom/logs/geoserver.log");
     }
 
     @Test
@@ -97,8 +135,32 @@ class GeoServerDeploymentLifecycleTest {
                 .contains("GEOSERVER_LOG_LOCATION=" + tempDir.resolve("logs/geoserver.log"))
                 .contains("JAVA_HOME=/opt/jdk8")
                 .contains("-Djetty.http.port=18080")
-                .contains("-Xmx512m");
+                .contains("-Xmx512m")
+                .doesNotContain("-Xmx4g");
         verify(initService).initialize();
+
+        listener.onApplicationEvent(new ContextClosedEvent(mock(org.springframework.context.ApplicationContext.class)));
+    }
+
+    @Test
+    void readyEventAddsDefaultFourGigabyteHeapLimitWhenNoExplicitXmxExists() throws Exception {
+        Path archive = fakeGeoServerArchive();
+        GeoServerInitProperties properties = properties(archive);
+
+        GeoServerRestClient restClient = mock(GeoServerRestClient.class);
+        GeoServerInitService initService = mock(GeoServerInitService.class);
+        when(restClient.checkStatus()).thenReturn(
+                new GeoServerStatus(false, null, "connection refused"),
+                new GeoServerStatus(true, "2.28.1", "ready"));
+
+        GeoServerAutoConfigurationListener listener = listener(properties, restClient, initService);
+
+        listener.onApplicationEvent(mock(ApplicationReadyEvent.class));
+
+        Path home = tempDir.resolve("install/geoserver-2.28.1");
+        assertThat(readWithRetry(home.resolve("startup.env")))
+                .contains("-Xmx4g")
+                .contains("GEOWEBCACHE_CACHE_DIR=" + tempDir.resolve("cache/192_168_0_1_gwc"));
 
         listener.onApplicationEvent(new ContextClosedEvent(mock(org.springframework.context.ApplicationContext.class)));
     }

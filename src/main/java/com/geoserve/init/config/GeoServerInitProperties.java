@@ -130,24 +130,30 @@ public class GeoServerInitProperties {
         private String nodeName = "local";
         /** classpath 或 file 资源位置，默认由部署包提供本地 GeoServer ZIP。 */
         private String archiveLocation = "classpath:geoserver/geoserver-bin.zip";
-        /** 托管部署工作根目录。 */
-        private String workDir = "runtime/geoserver";
-        /** GeoServer ZIP 解压目录。 */
-        private String installDir = "runtime/geoserver/install";
+        /** 业务侧只需配置的本机 GeoServer 托管根目录。 */
+        private String localRoot = "runtime/geoserver";
+        /** 业务侧只需配置的切片挂载盘根目录。 */
+        private String tileRoot = "runtime/geoserver/gwc-cache";
+        /** 托管部署工作根目录；为空时从 localRoot 派生。 */
+        private String workDir;
+        /** GeoServer ZIP 解压目录；为空时从 localRoot 派生。 */
+        private String installDir;
         /** 停止 Java 服务时是否删除解压出的运行目录；默认保留，便于下次增量补齐。 */
         private boolean deleteInstallOnStop = false;
-        /** GeoServer data directory，建议每个节点独立配置。 */
-        private String dataDir = "runtime/geoserver/data";
-        /** GeoWebCache 切片缓存目录，可配置为共享盘目录。 */
-        private String cacheDir = "runtime/geoserver/gwc-cache";
+        /** GeoServer data directory；为空时从 localRoot 派生。 */
+        private String dataDir;
+        /** GeoWebCache 切片缓存根目录；为空时从 tileRoot 派生。 */
+        private String cacheDir;
         /** 是否按本机 IP 在 cacheDir 下派生节点级 GWC 目录。 */
         private boolean cacheDirPerHostEnabled = true;
-        /** GeoServer 日志目录。 */
-        private String logDir = "logs/geoserver";
-        /** GeoServer 自身日志文件；为空时使用 logDir/geoserver.log。 */
+        /** GeoServer 日志目录；为空时从 localRoot 派生。 */
+        private String logDir;
+        /** GeoServer 自身日志文件；为空时使用 localRoot/logs/geoserver.log。 */
         private String logLocation;
         /** 启动 GeoServer 使用的 JAVA_HOME；为空时继承当前环境。 */
         private String javaHome;
+        /** GeoServer 子进程默认最大堆内存。 */
+        private String jvmMaxHeap = "4g";
         /** GeoServer HTTP 端口，默认匹配官方二进制包的 8080。 */
         private int port = 8080;
         /** GeoServer Web 上下文路径。 */
@@ -189,8 +195,24 @@ public class GeoServerInitProperties {
             this.archiveLocation = archiveLocation;
         }
 
+        public String getLocalRoot() {
+            return hasText(localRoot) ? localRoot : "runtime/geoserver";
+        }
+
+        public void setLocalRoot(String localRoot) {
+            this.localRoot = localRoot;
+        }
+
+        public String getTileRoot() {
+            return hasText(tileRoot) ? tileRoot : "runtime/geoserver/gwc-cache";
+        }
+
+        public void setTileRoot(String tileRoot) {
+            this.tileRoot = tileRoot;
+        }
+
         public String getWorkDir() {
-            return workDir;
+            return hasText(workDir) ? workDir : getLocalRoot();
         }
 
         public void setWorkDir(String workDir) {
@@ -198,7 +220,7 @@ public class GeoServerInitProperties {
         }
 
         public String getInstallDir() {
-            return installDir;
+            return hasText(installDir) ? installDir : joinPath(getLocalRoot(), "install");
         }
 
         public void setInstallDir(String installDir) {
@@ -214,7 +236,7 @@ public class GeoServerInitProperties {
         }
 
         public String getDataDir() {
-            return dataDir;
+            return hasText(dataDir) ? dataDir : joinPath(getLocalRoot(), "data");
         }
 
         public void setDataDir(String dataDir) {
@@ -222,7 +244,7 @@ public class GeoServerInitProperties {
         }
 
         public String getCacheDir() {
-            return cacheDir;
+            return hasText(cacheDir) ? cacheDir : getTileRoot();
         }
 
         public void setCacheDir(String cacheDir) {
@@ -238,7 +260,7 @@ public class GeoServerInitProperties {
         }
 
         public String getLogDir() {
-            return logDir;
+            return hasText(logDir) ? logDir : joinPath(getLocalRoot(), "logs");
         }
 
         public void setLogDir(String logDir) {
@@ -246,7 +268,7 @@ public class GeoServerInitProperties {
         }
 
         public String getLogLocation() {
-            return logLocation;
+            return hasText(logLocation) ? logLocation : joinPath(getLogDir(), "geoserver.log");
         }
 
         public void setLogLocation(String logLocation) {
@@ -259,6 +281,14 @@ public class GeoServerInitProperties {
 
         public void setJavaHome(String javaHome) {
             this.javaHome = javaHome;
+        }
+
+        public String getJvmMaxHeap() {
+            return jvmMaxHeap;
+        }
+
+        public void setJvmMaxHeap(String jvmMaxHeap) {
+            this.jvmMaxHeap = jvmMaxHeap;
         }
 
         public int getPort() {
@@ -323,6 +353,18 @@ public class GeoServerInitProperties {
 
         public void setRequireFile(String requireFile) {
             this.requireFile = requireFile;
+        }
+
+        private static boolean hasText(String value) {
+            return value != null && value.trim().length() > 0;
+        }
+
+        private static String joinPath(String root, String child) {
+            String normalizedRoot = hasText(root) ? root.trim() : "";
+            if (normalizedRoot.endsWith("/") || normalizedRoot.endsWith("\\")) {
+                return normalizedRoot + child;
+            }
+            return normalizedRoot + "/" + child;
         }
     }
 

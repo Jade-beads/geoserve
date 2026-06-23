@@ -183,21 +183,24 @@ src/main/resources/geoserver/geoserver-bin.zip
 
 停止项目时，应用会优先执行 `bin/shutdown.sh`，再销毁子进程。默认只停止 GeoServer，不删除 `install-dir`，也不会删除 `data-dir`、实际 GWC 切片目录、`log-dir`。如确实需要恢复旧行为，可以显式设置 `GEOSERVER_DEPLOY_DELETE_INSTALL_ON_STOP=true`。
 
-切片挂载盘根目录需要在项目启动前配置 `GEOSERVER_DEPLOY_CACHE_DIR`，或在配置文件中设置 `geoserver.deploy.cache-dir`。默认开启 `GEOSERVER_DEPLOY_CACHE_DIR_PER_HOST_ENABLED=true`，代码会按本机 IP 自动派生实际 GWC 切片目录，并在 GeoServer 启动脚本执行前注入到 `GEOWEBCACHE_CACHE_DIR` 和 `JAVA_OPTS -DGEOWEBCACHE_CACHE_DIR`。
+业务项目只需要改两个路径和账号密码：本机托管根目录 `GEOSERVER_DEPLOY_LOCAL_ROOT`、切片挂载盘根目录 `GEOSERVER_DEPLOY_TILE_ROOT`，以及 GeoServer、数据库连接账号密码。这些变量需要在项目启动前配置；`work-dir`、`install-dir`、`data-dir`、`log-dir`、`log-location` 会默认从 `local-root` 派生，`cache-dir` 会默认从 `tile-root` 派生。
 
-例如挂载盘根目录配置为：
+推荐部署配置：
 
 ```bash
-export GEOSERVER_DEPLOY_CACHE_DIR=/geoserver
+export GEOSERVER_DEPLOY_LOCAL_ROOT=/opt/geoserve/geoserver
+export GEOSERVER_DEPLOY_TILE_ROOT=/geoserver
 ```
 
-例如某个节点按本机 IP 派生后的实际 GWC 切片目录为：
+默认开启 `GEOSERVER_DEPLOY_CACHE_DIR_PER_HOST_ENABLED=true`，代码会按本机 IP 自动派生实际 GWC 切片目录，并在 GeoServer 启动脚本执行前注入到 `GEOWEBCACHE_CACHE_DIR` 和 `JAVA_OPTS -DGEOWEBCACHE_CACHE_DIR`。例如某个节点按本机 IP 派生后的实际 GWC 切片目录为：
 
 ```text
 /geoserver/192_168_0_1_gwc
 ```
 
 本机 IP 由项目内 `IpUtil.getHostIp()` 获取；如果无法获取非 loopback IPv4，应用会启动失败并输出明确错误，避免 A/B 两台机器误用同一个共享根目录。需要关闭按 IP 分目录时，设置 `GEOSERVER_DEPLOY_CACHE_DIR_PER_HOST_ENABLED=false`。
+
+默认会给 GeoServer 子进程追加 `-Xmx4g`，限制最大堆内存为 4G。如果外部 `JAVA_OPTS` 或 `geoserver.deploy.jvm-args` 已经显式配置 `-Xmx`，代码不会重复追加。需要调整时配置 `GEOSERVER_DEPLOY_JVM_MAX_HEAP`。
 
 `data-dir`、实际 GWC 切片目录、`log-dir` 建议放在 `install-dir` 外。尤其当显式开启 `GEOSERVER_DEPLOY_DELETE_INSTALL_ON_STOP=true` 时，这些可复用目录不能放到 `GEOSERVER_DEPLOY_INSTALL_DIR` 下面。
 
@@ -208,15 +211,18 @@ export GEOSERVER_DEPLOY_CACHE_DIR=/geoserver
 | `GEOSERVER_DEPLOY_ENABLED` | 是否启用本机托管 GeoServer | `false` |
 | `GEOSERVER_DEPLOY_NODE_NAME` | 当前节点名，用于日志区分 | `local` |
 | `GEOSERVER_DEPLOY_ARCHIVE_LOCATION` | GeoServer ZIP 包位置 | `classpath:geoserver/geoserver-bin.zip` |
-| `GEOSERVER_DEPLOY_WORK_DIR` | 托管部署根目录 | `runtime/geoserver` |
-| `GEOSERVER_DEPLOY_INSTALL_DIR` | GeoServer 解压运行目录，默认停止时保留 | `runtime/geoserver/install` |
+| `GEOSERVER_DEPLOY_LOCAL_ROOT` | 本机 GeoServer 托管根目录，推荐业务只改这个本机路径 | `runtime/geoserver` |
+| `GEOSERVER_DEPLOY_TILE_ROOT` | GWC 切片挂载盘根目录，推荐业务只改这个挂载盘路径 | `runtime/geoserver/gwc-cache` |
+| `GEOSERVER_DEPLOY_WORK_DIR` | 托管部署根目录；未配置时读取 `local-root` | `runtime/geoserver` |
+| `GEOSERVER_DEPLOY_INSTALL_DIR` | GeoServer 解压运行目录；未配置时为 `local-root/install` | `runtime/geoserver/install` |
 | `GEOSERVER_DEPLOY_DELETE_INSTALL_ON_STOP` | 停止项目时是否删除解压运行目录 | `false` |
-| `GEOSERVER_DEPLOY_DATA_DIR` | GeoServer 数据目录，建议 A/B 各自独立 | `runtime/geoserver/data` |
-| `GEOSERVER_DEPLOY_CACHE_DIR` | GWC 切片挂载盘根目录，默认会按本机 IP 派生子目录 | `runtime/geoserver/gwc-cache` |
+| `GEOSERVER_DEPLOY_DATA_DIR` | GeoServer 数据目录；未配置时为 `local-root/data` | `runtime/geoserver/data` |
+| `GEOSERVER_DEPLOY_CACHE_DIR` | GWC 切片挂载盘根目录；未配置时读取 `tile-root` | `runtime/geoserver/gwc-cache` |
 | `GEOSERVER_DEPLOY_CACHE_DIR_PER_HOST_ENABLED` | 是否按本机 IP 派生实际 GWC 目录 | `true` |
-| `GEOSERVER_DEPLOY_LOG_DIR` | GeoServer 日志目录 | `logs/geoserver` |
-| `GEOSERVER_DEPLOY_LOG_LOCATION` | GeoServer 自身日志文件 | `logs/geoserver/geoserver.log` |
+| `GEOSERVER_DEPLOY_LOG_DIR` | GeoServer 日志目录；未配置时为 `local-root/logs` | `runtime/geoserver/logs` |
+| `GEOSERVER_DEPLOY_LOG_LOCATION` | GeoServer 自身日志文件；未配置时为 `local-root/logs/geoserver.log` | `runtime/geoserver/logs/geoserver.log` |
 | `GEOSERVER_DEPLOY_JAVA_HOME` | 启动 GeoServer 使用的 JDK 路径 | 空，继承当前环境 |
+| `GEOSERVER_DEPLOY_JVM_MAX_HEAP` | GeoServer 子进程默认最大堆内存 | `4g` |
 | `GEOSERVER_DEPLOY_PORT` | GeoServer 端口 | `8080` |
 | `GEOSERVER_DEPLOY_CONTEXT_PATH` | GeoServer 上下文路径 | `/geoserver` |
 | `GEOSERVER_DEPLOY_STARTUP_TIMEOUT_SECONDS` | 等待 GeoServer 可用的超时时间 | `120` |
@@ -225,7 +231,7 @@ export GEOSERVER_DEPLOY_CACHE_DIR=/geoserver
 
 `GEOSERVER_BASE_URL` 必须和托管 GeoServer 的真实端口、上下文路径一致。默认是 `http://localhost:8080/geoserver`；如果调整 `GEOSERVER_DEPLOY_PORT` 或 `GEOSERVER_DEPLOY_CONTEXT_PATH`，需要同步调整 `GEOSERVER_BASE_URL`。
 
-`GEOSERVER_DEPLOY_CACHE_DIR` 是挂载盘根目录，不是最终写入切片的目录。开启按 IP 分目录后，最终目录固定为 `<cache-dir>/<本机IP下划线>_gwc`。
+`GEOSERVER_DEPLOY_TILE_ROOT` 和兼容项 `GEOSERVER_DEPLOY_CACHE_DIR` 都表示挂载盘根目录，不是最终写入切片的目录。开启按 IP 分目录后，最终目录固定为 `<tile-root>/<本机IP下划线>_gwc`。
 
 ### A/B 节点示例
 
@@ -234,17 +240,14 @@ A 节点：
 ```bash
 export GEOSERVER_DEPLOY_ENABLED=true
 export GEOSERVER_DEPLOY_NODE_NAME=A
-export GEOSERVER_DEPLOY_INSTALL_DIR=/opt/geoserve/runtime/a/install
-export GEOSERVER_DEPLOY_DATA_DIR=/opt/geoserve/runtime/a/data
-export GEOSERVER_DEPLOY_LOG_DIR=/opt/geoserve/logs/a
-export GEOSERVER_DEPLOY_LOG_LOCATION=/opt/geoserve/logs/a/geoserver.log
-export GEOSERVER_DEPLOY_CACHE_DIR=/geoserver
+export GEOSERVER_DEPLOY_LOCAL_ROOT=/opt/geoserve/geoserver
+export GEOSERVER_DEPLOY_TILE_ROOT=/geoserver
 export GEOSERVER_DEPLOY_CACHE_DIR_PER_HOST_ENABLED=true
 export GEOSERVER_BASE_URL=http://localhost:8080/geoserver
 export GEOSERVER_INIT_RUN_ON_STARTUP=true
 ```
 
-B 节点只需要把 `NODE_NAME`、`INSTALL_DIR`、`DATA_DIR`、`LOG_DIR` 改成 B 节点自己的目录，`GEOSERVER_DEPLOY_CACHE_DIR` 可以继续指向同一个挂载盘根目录。实际 GWC 目录会按本机 IP 区分，例如 A 节点是 `/geoserver/192_168_0_1_gwc`，B 节点是 `/geoserver/192_168_0_2_gwc`。
+B 节点只需要把 `NODE_NAME` 和 `GEOSERVER_DEPLOY_LOCAL_ROOT` 改成 B 节点自己的本机目录，`GEOSERVER_DEPLOY_TILE_ROOT` 可以继续指向同一个挂载盘根目录。实际 GWC 目录会按本机 IP 区分，例如 A 节点是 `/geoserver/192_168_0_1_gwc`，B 节点是 `/geoserver/192_168_0_2_gwc`。
 
 ## 资源清单
 

@@ -28,19 +28,23 @@ geoserver:
     node-name: ${GEOSERVER_DEPLOY_NODE_NAME:local}
     # GeoServer ZIP 包可以放在 src/main/resources/geoserver/ 下，构建时打入应用包。
     archive-location: ${GEOSERVER_DEPLOY_ARCHIVE_LOCATION:classpath:geoserver/geoserver-bin.zip}
-    # work-dir 是托管部署根目录；install-dir 是每次解压出的运行目录。
-    work-dir: ${GEOSERVER_DEPLOY_WORK_DIR:runtime/geoserver}
-    install-dir: ${GEOSERVER_DEPLOY_INSTALL_DIR:runtime/geoserver/install}
+    # 业务侧推荐只配置 local-root 和 tile-root，其他目录默认从这两个根路径派生。
+    local-root: ${GEOSERVER_DEPLOY_LOCAL_ROOT:runtime/geoserver}
+    tile-root: ${GEOSERVER_DEPLOY_TILE_ROOT:runtime/geoserver/gwc-cache}
+    work-dir: ${GEOSERVER_DEPLOY_WORK_DIR:${geoserver.deploy.local-root}}
+    install-dir: ${GEOSERVER_DEPLOY_INSTALL_DIR:${geoserver.deploy.local-root}/install}
     # 停止项目时默认只停止 GeoServer，不删除 install-dir。
     delete-install-on-stop: ${GEOSERVER_DEPLOY_DELETE_INSTALL_ON_STOP:false}
     # GeoServer data directory，A/B 节点建议分别配置独立目录。
-    data-dir: ${GEOSERVER_DEPLOY_DATA_DIR:runtime/geoserver/data}
+    data-dir: ${GEOSERVER_DEPLOY_DATA_DIR:${geoserver.deploy.local-root}/data}
     # GeoWebCache 切片挂载盘根目录；默认按本机 IP 派生实际 GWC 目录。
-    cache-dir: ${GEOSERVER_DEPLOY_CACHE_DIR:runtime/geoserver/gwc-cache}
+    cache-dir: ${GEOSERVER_DEPLOY_CACHE_DIR:${geoserver.deploy.tile-root}}
     cache-dir-per-host-enabled: ${GEOSERVER_DEPLOY_CACHE_DIR_PER_HOST_ENABLED:true}
-    log-dir: ${GEOSERVER_DEPLOY_LOG_DIR:logs/geoserver}
-    log-location: ${GEOSERVER_DEPLOY_LOG_LOCATION:logs/geoserver/geoserver.log}
+    log-dir: ${GEOSERVER_DEPLOY_LOG_DIR:${geoserver.deploy.local-root}/logs}
+    log-location: ${GEOSERVER_DEPLOY_LOG_LOCATION:${geoserver.deploy.local-root}/logs/geoserver.log}
     java-home: ${GEOSERVER_DEPLOY_JAVA_HOME:}
+    # 默认限制 GeoServer 子进程最大堆内存为 4G；如果 JAVA_OPTS 或 jvm-args 已配置 -Xmx，则不会重复追加。
+    jvm-max-heap: ${GEOSERVER_DEPLOY_JVM_MAX_HEAP:4g}
     port: ${GEOSERVER_DEPLOY_PORT:8080}
     context-path: ${GEOSERVER_DEPLOY_CONTEXT_PATH:/geoserver}
     startup-timeout-seconds: ${GEOSERVER_DEPLOY_STARTUP_TIMEOUT_SECONDS:120}

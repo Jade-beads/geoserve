@@ -396,12 +396,48 @@ public class GeoServerAutoConfigurationListener implements ApplicationListener<A
         if (deploy.getJvmArgs() != null) {
             options.addAll(deploy.getJvmArgs());
         }
+        if (!hasXmxOption(existingJavaOpts, deploy.getJvmArgs()) && hasText(deploy.getJvmMaxHeap())) {
+            options.add(xmxOption(deploy.getJvmMaxHeap()));
+        }
         options.add("-DGEOSERVER_DATA_DIR=" + dataDir.getAbsolutePath());
         options.add("-DGEOWEBCACHE_CACHE_DIR=" + cacheDir.getAbsolutePath());
         options.add("-DGEOSERVER_LOG_LOCATION=" + logLocation.getAbsolutePath());
         options.add("-Djetty.port=" + deploy.getPort());
         options.add("-Djetty.http.port=" + deploy.getPort());
         return join(options, " ");
+    }
+
+    private boolean hasXmxOption(String existingJavaOpts, List<String> jvmArgs) {
+        if (containsXmxOption(existingJavaOpts)) {
+            return true;
+        }
+        if (jvmArgs == null) {
+            return false;
+        }
+        for (String arg : jvmArgs) {
+            if (containsXmxOption(arg)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean containsXmxOption(String value) {
+        if (!hasText(value)) {
+            return false;
+        }
+        String[] tokens = value.trim().split("\\s+");
+        for (String token : tokens) {
+            if (token.startsWith("-Xmx")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String xmxOption(String jvmMaxHeap) {
+        String value = jvmMaxHeap.trim();
+        return value.startsWith("-Xmx") ? value : "-Xmx" + value;
     }
 
     private void chmodExecutable(File target, Map<String, String> environment, File directory)

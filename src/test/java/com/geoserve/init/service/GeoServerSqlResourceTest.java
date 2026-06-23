@@ -184,10 +184,14 @@ class GeoServerSqlResourceTest {
         assertThat(yaml).contains("deploy:");
         assertThat(yaml).contains("enabled: ${GEOSERVER_DEPLOY_ENABLED:false}");
         assertThat(yaml).contains("archive-location: ${GEOSERVER_DEPLOY_ARCHIVE_LOCATION:classpath:geoserver/geoserver-bin.zip}");
-        assertThat(yaml).contains("data-dir: ${GEOSERVER_DEPLOY_DATA_DIR:runtime/geoserver/data}");
-        assertThat(yaml).contains("cache-dir: ${GEOSERVER_DEPLOY_CACHE_DIR:runtime/geoserver/gwc-cache}");
+        assertThat(yaml).contains("local-root: ${GEOSERVER_DEPLOY_LOCAL_ROOT:runtime/geoserver}");
+        assertThat(yaml).contains("tile-root: ${GEOSERVER_DEPLOY_TILE_ROOT:runtime/geoserver/gwc-cache}");
+        assertThat(yaml).contains("install-dir: ${GEOSERVER_DEPLOY_INSTALL_DIR:${geoserver.deploy.local-root}/install}");
+        assertThat(yaml).contains("data-dir: ${GEOSERVER_DEPLOY_DATA_DIR:${geoserver.deploy.local-root}/data}");
+        assertThat(yaml).contains("cache-dir: ${GEOSERVER_DEPLOY_CACHE_DIR:${geoserver.deploy.tile-root}}");
         assertThat(yaml).contains("cache-dir-per-host-enabled: ${GEOSERVER_DEPLOY_CACHE_DIR_PER_HOST_ENABLED:true}");
-        assertThat(yaml).contains("log-location: ${GEOSERVER_DEPLOY_LOG_LOCATION:logs/geoserver/geoserver.log}");
+        assertThat(yaml).contains("log-location: ${GEOSERVER_DEPLOY_LOG_LOCATION:${geoserver.deploy.local-root}/logs/geoserver.log}");
+        assertThat(yaml).contains("jvm-max-heap: ${GEOSERVER_DEPLOY_JVM_MAX_HEAP:4g}");
         assertThat(yaml).contains("startup-timeout-seconds: ${GEOSERVER_DEPLOY_STARTUP_TIMEOUT_SECONDS:120}");
     }
 
@@ -205,7 +209,10 @@ class GeoServerSqlResourceTest {
         String readme = readFile("README.md");
 
         assertThat(readme).contains("score_style");
-        assertThat(readme).contains("GEOSERVER_DEPLOY_CACHE_DIR=/geoserver");
+        assertThat(readme).contains("GEOSERVER_DEPLOY_LOCAL_ROOT=/opt/geoserve/geoserver");
+        assertThat(readme).contains("GEOSERVER_DEPLOY_TILE_ROOT=/geoserver");
+        assertThat(readme).contains("业务项目只需要改两个路径和账号密码");
+        assertThat(readme).contains("默认会给 GeoServer 子进程追加 `-Xmx4g`");
         assertThat(readme).contains("/geoserver/192_168_0_1_gwc");
         assertThat(readme).contains("启动脚本执行前注入到 `GEOWEBCACHE_CACHE_DIR`");
         assertThat(readme).contains("需要在项目启动前配置");
