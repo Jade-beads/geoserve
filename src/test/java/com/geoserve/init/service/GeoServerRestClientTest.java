@@ -181,7 +181,7 @@ class GeoServerRestClientTest {
     @Test
     void ensureSqlViewLayerCanUseConfiguredBatchIdParameterNameForModeResult() {
         Layer layer = sqlViewLayer("mode_result", false);
-        layer.setDefaultStyle("count_style");
+        layer.setDefaultStyle("score_style");
         layer.setSqlLocation("classpath:sql/mode_result.sql");
         layer.setBatchIdParameterName("batch_id");
         layer.setSqlParameters(Collections.singletonList(modeResultType()));
@@ -200,7 +200,7 @@ class GeoServerRestClientTest {
                 .andRespond(withStatus(HttpStatus.CREATED));
         server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/layers/site_selection:mode_result"))
                 .andExpect(method(HttpMethod.PUT))
-                .andExpect(content().string(containsString("\"defaultStyle\":{\"name\":\"site_selection:count_style\"}")))
+                .andExpect(content().string(containsString("\"defaultStyle\":{\"name\":\"site_selection:score_style\"}")))
                 .andRespond(withSuccess());
 
         ResourceAction action = client.ensureFeatureType(layer);

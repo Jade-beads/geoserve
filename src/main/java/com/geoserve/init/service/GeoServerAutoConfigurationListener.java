@@ -3,6 +3,7 @@ package com.geoserve.init.service;
 import com.geoserve.init.config.GeoServerInitProperties;
 import com.geoserve.init.config.GeoServerInitProperties.Deploy;
 import com.geoserve.init.model.GeoServerStatus;
+import com.geoserve.init.util.IpUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,9 +20,10 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.net.InetAddress;
+import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -144,7 +146,7 @@ public class GeoServerAutoConfigurationListener implements ApplicationListener<A
                 File home = resolveHomeFromScript(script, deploy.getShutdownScript());
                 Map<String, String> environment = environment(deploy, home,
                         file(required(deploy.getDataDir(), "geoserver.deploy.dataDir")),
-                        file(required(deploy.getCacheDir(), "geoserver.deploy.cacheDir")),
+                        cacheDirectory(deploy),
                         logLocation(deploy, file(required(deploy.getLogDir(), "geoserver.deploy.logDir"))));
                 chmodExecutable(script, environment, home);
                 String[] cmdArr = {"sh", "-c", script.getAbsolutePath()};
@@ -191,7 +193,7 @@ public class GeoServerAutoConfigurationListener implements ApplicationListener<A
         File workDir = mkdir(required(deploy.getWorkDir(), "geoserver.deploy.workDir"));
         File installDir = file(required(deploy.getInstallDir(), "geoserver.deploy.installDir"));
         File dataDir = file(required(deploy.getDataDir(), "geoserver.deploy.dataDir"));
-        File cacheDir = file(required(deploy.getCacheDir(), "geoserver.deploy.cacheDir"));
+        File cacheDir = cacheDirectory(deploy);
         File logDir = file(required(deploy.getLogDir(), "geoserver.deploy.logDir"));
         validatePersistentDirectory("data-dir", dataDir, installDir, deploy);
         validatePersistentDirectory("cache-dir", cacheDir, installDir, deploy);
@@ -200,9 +202,6 @@ public class GeoServerAutoConfigurationListener implements ApplicationListener<A
         validatePersistentDirectory("log-location", logLocation, installDir, deploy);
 
         mkdir(workDir);
-        if (installDir.exists()) {
-            deleteRecursively(installDir);
-        }
         mkdir(installDir);
         mkdir(dataDir);
         mkdir(cacheDir);
@@ -279,9 +278,12 @@ public class GeoServerAutoConfigurationListener implements ApplicationListener<A
                 File target = safeZipTarget(installDir, entry);
                 if (entry.isDirectory()) {
                     mkdir(target);
+                } else if (target.exists()) {
+                    log.debug("GeoServer archive entry skipped because target exists node={} path={}",
+                            nodeName(deploy), target.getAbsolutePath());
                 } else {
                     mkdir(target.getParentFile());
-                    Files.copy(zip, target.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                    Files.copy(zip, target.toPath());
                 }
                 zip.closeEntry();
             }
@@ -359,6 +361,30 @@ public class GeoServerAutoConfigurationListener implements ApplicationListener<A
         }
         environment.put("JAVA_OPTS", javaOpts(deploy, dataDir, cacheDir, logLocation));
         return environment;
+    }
+
+    private File cacheDirectory(Deploy deploy) {
+        File cacheRoot = file(required(deploy.getCacheDir(), "geoserver.deploy.cacheDir"));
+        if (!deploy.isCacheDirPerHostEnabled()) {
+            return cacheRoot;
+        }
+        String hostAddress;
+        try {
+            InetAddress hostIp = resolveHostIp();
+            hostAddress = hostIp == null ? "" : hostIp.getHostAddress();
+        } catch (RuntimeException ex) {
+            throw new IllegalStateException("Cannot resolve host IP for GeoWebCache cache directory", ex);
+        } catch (SocketException ex) {
+            throw new IllegalStateException("Cannot resolve host IP for GeoWebCache cache directory", ex);
+        }
+        if (!hasText(hostAddress)) {
+            throw new IllegalStateException("Cannot resolve host IP for GeoWebCache cache directory");
+        }
+        return new File(cacheRoot, hostAddress.replace('.', '_') + "_gwc");
+    }
+
+    protected InetAddress resolveHostIp() throws SocketException {
+        return IpUtil.getHostIp();
     }
 
     private String javaOpts(Deploy deploy, File dataDir, File cacheDir, File logLocation) {

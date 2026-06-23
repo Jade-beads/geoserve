@@ -132,14 +132,16 @@ public class GeoServerInitProperties {
         private String archiveLocation = "classpath:geoserver/geoserver-bin.zip";
         /** 托管部署工作根目录。 */
         private String workDir = "runtime/geoserver";
-        /** GeoServer ZIP 解压目录；停止时只清理该目录。 */
+        /** GeoServer ZIP 解压目录。 */
         private String installDir = "runtime/geoserver/install";
-        /** 停止 Java 服务时是否删除解压出的运行目录。 */
-        private boolean deleteInstallOnStop = true;
+        /** 停止 Java 服务时是否删除解压出的运行目录；默认保留，便于下次增量补齐。 */
+        private boolean deleteInstallOnStop = false;
         /** GeoServer data directory，建议每个节点独立配置。 */
         private String dataDir = "runtime/geoserver/data";
         /** GeoWebCache 切片缓存目录，可配置为共享盘目录。 */
         private String cacheDir = "runtime/geoserver/gwc-cache";
+        /** 是否按本机 IP 在 cacheDir 下派生节点级 GWC 目录。 */
+        private boolean cacheDirPerHostEnabled = true;
         /** GeoServer 日志目录。 */
         private String logDir = "logs/geoserver";
         /** GeoServer 自身日志文件；为空时使用 logDir/geoserver.log。 */
@@ -225,6 +227,14 @@ public class GeoServerInitProperties {
 
         public void setCacheDir(String cacheDir) {
             this.cacheDir = cacheDir;
+        }
+
+        public boolean isCacheDirPerHostEnabled() {
+            return cacheDirPerHostEnabled;
+        }
+
+        public void setCacheDirPerHostEnabled(boolean cacheDirPerHostEnabled) {
+            this.cacheDirPerHostEnabled = cacheDirPerHostEnabled;
         }
 
         public String getLogDir() {

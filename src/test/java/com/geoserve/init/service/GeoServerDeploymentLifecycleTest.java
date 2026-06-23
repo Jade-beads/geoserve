@@ -14,6 +14,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -49,8 +51,9 @@ class GeoServerDeploymentLifecycleTest {
         assertThat(deploy.getInstallDir()).isEqualTo("runtime/geoserver/install");
         assertThat(deploy.getDataDir()).isEqualTo("runtime/geoserver/data");
         assertThat(deploy.getCacheDir()).isEqualTo("runtime/geoserver/gwc-cache");
+        assertThat(deploy.isCacheDirPerHostEnabled()).isTrue();
         assertThat(deploy.getLogDir()).isEqualTo("logs/geoserver");
-        assertThat(deploy.isDeleteInstallOnStop()).isTrue();
+        assertThat(deploy.isDeleteInstallOnStop()).isFalse();
     }
 
     @Test
@@ -89,7 +92,7 @@ class GeoServerDeploymentLifecycleTest {
         assertThat(Files.isDirectory(tempDir.resolve("cache"))).isTrue();
         assertThat(Files.isDirectory(tempDir.resolve("logs"))).isTrue();
         assertThat(readWithRetry(home.resolve("startup.env")))
-                .contains("GEOWEBCACHE_CACHE_DIR=" + tempDir.resolve("cache"))
+                .contains("GEOWEBCACHE_CACHE_DIR=" + tempDir.resolve("cache/192_168_0_1_gwc"))
                 .contains("GEOSERVER_DATA_DIR=" + tempDir.resolve("data"))
                 .contains("GEOSERVER_LOG_LOCATION=" + tempDir.resolve("logs/geoserver.log"))
                 .contains("JAVA_HOME=/opt/jdk8")
@@ -101,7 +104,7 @@ class GeoServerDeploymentLifecycleTest {
     }
 
     @Test
-    void readyEventStopsRunningProcessDeletesInstallDirectoryAndStartsAgain() throws Exception {
+    void readyEventStopsRunningProcessKeepsInstallDirectoryAndExtractsOnlyMissingFiles() throws Exception {
         Path archive = fakeGeoServerArchive();
         GeoServerInitProperties properties = properties(archive);
         properties.getInit().setRunOnStartup(true);
@@ -114,12 +117,15 @@ class GeoServerDeploymentLifecycleTest {
         GeoServerAutoConfigurationListener listener = listener(properties, restClient, initService);
 
         listener.onApplicationEvent(mock(ApplicationReadyEvent.class));
-        Path marker = tempDir.resolve("install/old-marker.txt");
-        Files.write(marker, "old".getBytes(StandardCharsets.UTF_8));
+        Path existing = tempDir.resolve("install/geoserver-2.28.1/conf/existing.txt");
+        Path missing = tempDir.resolve("install/geoserver-2.28.1/conf/missing.txt");
+        Files.write(existing, "local-custom".getBytes(StandardCharsets.UTF_8));
+        Files.delete(missing);
 
         listener.onApplicationEvent(mock(ApplicationReadyEvent.class));
 
-        assertThat(Files.exists(marker)).isFalse();
+        assertThat(new String(Files.readAllBytes(existing), StandardCharsets.UTF_8)).isEqualTo("local-custom");
+        assertThat(new String(Files.readAllBytes(missing), StandardCharsets.UTF_8)).isEqualTo("archive-missing");
         assertThat(Files.exists(tempDir.resolve("install/geoserver-2.28.1/bin/startup.sh"))).isTrue();
         verify(initService, times(2)).initialize();
 
@@ -127,7 +133,7 @@ class GeoServerDeploymentLifecycleTest {
     }
 
     @Test
-    void closeEventStopsProcessDeletesOnlyInstallDirectoryAndKeepsCacheDataAndLogs() throws Exception {
+    void closeEventStopsProcessAndKeepsInstallDirectoryCacheDataAndLogs() throws Exception {
         Path archive = fakeGeoServerArchive();
         GeoServerInitProperties properties = properties(archive);
         GeoServerRestClient restClient = mock(GeoServerRestClient.class);
@@ -139,14 +145,14 @@ class GeoServerDeploymentLifecycleTest {
 
         listener.onApplicationEvent(mock(ApplicationReadyEvent.class));
         Files.write(tempDir.resolve("data/keep.txt"), "data".getBytes(StandardCharsets.UTF_8));
-        Files.write(tempDir.resolve("cache/keep.txt"), "cache".getBytes(StandardCharsets.UTF_8));
+        Files.write(tempDir.resolve("cache/192_168_0_1_gwc/keep.txt"), "cache".getBytes(StandardCharsets.UTF_8));
         Files.write(tempDir.resolve("logs/keep.txt"), "logs".getBytes(StandardCharsets.UTF_8));
 
         listener.onApplicationEvent(new ContextClosedEvent(mock(org.springframework.context.ApplicationContext.class)));
 
-        assertThat(Files.exists(tempDir.resolve("install"))).isFalse();
+        assertThat(Files.exists(tempDir.resolve("install/geoserver-2.28.1/bin/startup.sh"))).isTrue();
         assertThat(Files.exists(tempDir.resolve("data/keep.txt"))).isTrue();
-        assertThat(Files.exists(tempDir.resolve("cache/keep.txt"))).isTrue();
+        assertThat(Files.exists(tempDir.resolve("cache/192_168_0_1_gwc/keep.txt"))).isTrue();
         assertThat(Files.exists(tempDir.resolve("logs/keep.txt"))).isTrue();
     }
 
@@ -170,29 +176,40 @@ class GeoServerDeploymentLifecycleTest {
     }
 
     @Test
-    void readyEventFailsWhenCacheDirectoryWouldBeDeletedWithInstallDirectory() throws Exception {
+    void readyEventFailsWhenHostIpCannotBeResolvedForPerHostCacheDirectory() throws Exception {
         Path archive = fakeGeoServerArchive();
         GeoServerInitProperties properties = properties(archive);
-        properties.getDeploy().setCacheDir(tempDir.resolve("install/cache").toString());
         GeoServerRestClient restClient = mock(GeoServerRestClient.class);
         GeoServerInitService initService = mock(GeoServerInitService.class);
         when(restClient.checkStatus()).thenReturn(new GeoServerStatus(false, null, "not running"));
-        GeoServerAutoConfigurationListener listener = listener(properties, restClient, initService);
+        GeoServerAutoConfigurationListener listener = failingIpListener(properties, restClient, initService);
 
         assertThatThrownBy(new org.assertj.core.api.ThrowableAssert.ThrowingCallable() {
             @Override
             public void call() {
                 listener.onApplicationEvent(mock(ApplicationReadyEvent.class));
             }
-        }).isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("cache-dir");
+        }).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Cannot resolve host IP for GeoWebCache cache directory");
         verify(initService, never()).initialize();
     }
 
     private GeoServerAutoConfigurationListener listener(GeoServerInitProperties properties,
                                                         GeoServerRestClient restClient,
                                                         GeoServerInitService initService) {
-        GeoServerAutoConfigurationListener listener = new GeoServerAutoConfigurationListener();
+        GeoServerAutoConfigurationListener listener = new TestGeoServerAutoConfigurationListener("192" + ".168.0.1");
+        ReflectionTestUtils.setField(listener, "properties", properties);
+        ReflectionTestUtils.setField(listener, "restClient", restClient);
+        ReflectionTestUtils.setField(listener, "initService", initService);
+        ReflectionTestUtils.setField(listener, "resourceLoader", new DefaultResourceLoader());
+        ReflectionTestUtils.setField(listener, "sleepMillis", 5L);
+        return listener;
+    }
+
+    private GeoServerAutoConfigurationListener failingIpListener(GeoServerInitProperties properties,
+                                                                 GeoServerRestClient restClient,
+                                                                 GeoServerInitService initService) {
+        GeoServerAutoConfigurationListener listener = new TestGeoServerAutoConfigurationListener(null);
         ReflectionTestUtils.setField(listener, "properties", properties);
         ReflectionTestUtils.setField(listener, "restClient", restClient);
         ReflectionTestUtils.setField(listener, "initService", initService);
@@ -234,6 +251,8 @@ class GeoServerDeploymentLifecycleTest {
             addZipEntry(zip, "geoserver-2.28.1/bin/shutdown.sh",
                     "#!/bin/sh\n"
                             + "echo stop > shutdown.env\n");
+            addZipEntry(zip, "geoserver-2.28.1/conf/existing.txt", "archive-existing");
+            addZipEntry(zip, "geoserver-2.28.1/conf/missing.txt", "archive-missing");
         } finally {
             zip.close();
         }
@@ -260,5 +279,25 @@ class GeoServerDeploymentLifecycleTest {
             Thread.sleep(10L);
         }
         return "";
+    }
+
+    private static class TestGeoServerAutoConfigurationListener extends GeoServerAutoConfigurationListener {
+        private final String hostIp;
+
+        TestGeoServerAutoConfigurationListener(String hostIp) {
+            this.hostIp = hostIp;
+        }
+
+        @Override
+        protected InetAddress resolveHostIp() throws SocketException {
+            if (hostIp == null) {
+                throw new RuntimeException("no-available-ip");
+            }
+            try {
+                return InetAddress.getByName(hostIp);
+            } catch (Exception ex) {
+                throw new SocketException(ex.getMessage());
+            }
+        }
     }
 }

@@ -89,6 +89,7 @@ class GeoServerSqlResourceTest {
         assertThat(yaml).contains("name: mode_result");
         assertThat(yaml).contains("sql-location: classpath:sql/mode_result.sql");
         assertThat(yaml).contains("batch-id-parameter-name: batch_id");
+        assertThat(yaml).contains("default-style: score_style");
         assertThat(yaml).contains("default-value: grid_indicator_score");
         assertThat(yaml).contains("grid_indicator_score|grid_pop_score|grid_peer_score");
     }
@@ -97,15 +98,21 @@ class GeoServerSqlResourceTest {
     void sldDisplayTextUsesChineseNames() throws Exception {
         String countSld = read("styles/count-style.sld");
         String priceSld = read("styles/price-style.sld");
+        String scoreSld = read("styles/score-style.sld");
 
         assertThat(countSld).contains("<sld:Name>人口数量样式</sld:Name>");
         assertThat(priceSld).contains("<sld:Name>价格样式</sld:Name>");
+        assertThat(scoreSld).contains("<sld:Name>评分样式</sld:Name>");
+        assertThat(scoreSld).contains("<ogc:PropertyName>total_num</ogc:PropertyName>");
         assertThat(countSld).contains("<sld:Name>高值</sld:Name>");
         assertThat(countSld).contains("<sld:Name>中值</sld:Name>");
         assertThat(countSld).contains("<sld:Name>低值</sld:Name>");
         assertThat(priceSld).contains("<sld:Name>高值</sld:Name>");
         assertThat(priceSld).contains("<sld:Name>中值</sld:Name>");
         assertThat(priceSld).contains("<sld:Name>低值</sld:Name>");
+        assertThat(scoreSld).contains("<sld:Name>高值</sld:Name>");
+        assertThat(scoreSld).contains("<sld:Name>中值</sld:Name>");
+        assertThat(scoreSld).contains("<sld:Name>低值</sld:Name>");
         assertThat(countSld).doesNotContain("<sld:Name>high</sld:Name>");
         assertThat(countSld).doesNotContain("<sld:Name>medium</sld:Name>");
         assertThat(countSld).doesNotContain("<sld:Name>low</sld:Name>");
@@ -179,6 +186,7 @@ class GeoServerSqlResourceTest {
         assertThat(yaml).contains("archive-location: ${GEOSERVER_DEPLOY_ARCHIVE_LOCATION:classpath:geoserver/geoserver-bin.zip}");
         assertThat(yaml).contains("data-dir: ${GEOSERVER_DEPLOY_DATA_DIR:runtime/geoserver/data}");
         assertThat(yaml).contains("cache-dir: ${GEOSERVER_DEPLOY_CACHE_DIR:runtime/geoserver/gwc-cache}");
+        assertThat(yaml).contains("cache-dir-per-host-enabled: ${GEOSERVER_DEPLOY_CACHE_DIR_PER_HOST_ENABLED:true}");
         assertThat(yaml).contains("log-location: ${GEOSERVER_DEPLOY_LOG_LOCATION:logs/geoserver/geoserver.log}");
         assertThat(yaml).contains("startup-timeout-seconds: ${GEOSERVER_DEPLOY_STARTUP_TIMEOUT_SECONDS:120}");
     }
@@ -196,10 +204,12 @@ class GeoServerSqlResourceTest {
     void readmeExplainsSharedTileCacheConfigurationBeforeStartup() throws Exception {
         String readme = readFile("README.md");
 
-        assertThat(readme).contains("GEOSERVER_DEPLOY_CACHE_DIR=/mnt/share/geowebcache/site-selection");
+        assertThat(readme).contains("score_style");
+        assertThat(readme).contains("GEOSERVER_DEPLOY_CACHE_DIR=/geoserver");
+        assertThat(readme).contains("/geoserver/192_168_0_1_gwc");
         assertThat(readme).contains("启动脚本执行前注入到 `GEOWEBCACHE_CACHE_DIR`");
         assertThat(readme).contains("需要在项目启动前配置");
-        assertThat(readme).contains("不能放到 `GEOSERVER_DEPLOY_INSTALL_DIR` 里面");
+        assertThat(readme).contains("按本机 IP 自动派生");
     }
 
     private void assertDynamicColumnSql(String resource, String tableName) throws Exception {

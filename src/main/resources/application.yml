@@ -31,12 +31,13 @@ geoserver:
     # work-dir 是托管部署根目录；install-dir 是每次解压出的运行目录。
     work-dir: ${GEOSERVER_DEPLOY_WORK_DIR:runtime/geoserver}
     install-dir: ${GEOSERVER_DEPLOY_INSTALL_DIR:runtime/geoserver/install}
-    # 停止项目时只删除 install-dir，不删除 data/cache/log 目录。
-    delete-install-on-stop: ${GEOSERVER_DEPLOY_DELETE_INSTALL_ON_STOP:true}
+    # 停止项目时默认只停止 GeoServer，不删除 install-dir。
+    delete-install-on-stop: ${GEOSERVER_DEPLOY_DELETE_INSTALL_ON_STOP:false}
     # GeoServer data directory，A/B 节点建议分别配置独立目录。
     data-dir: ${GEOSERVER_DEPLOY_DATA_DIR:runtime/geoserver/data}
-    # GeoWebCache 切片目录，可指向 A/B 共同可访问的共享盘。
+    # GeoWebCache 切片挂载盘根目录；默认按本机 IP 派生实际 GWC 目录。
     cache-dir: ${GEOSERVER_DEPLOY_CACHE_DIR:runtime/geoserver/gwc-cache}
+    cache-dir-per-host-enabled: ${GEOSERVER_DEPLOY_CACHE_DIR_PER_HOST_ENABLED:true}
     log-dir: ${GEOSERVER_DEPLOY_LOG_DIR:logs/geoserver}
     log-location: ${GEOSERVER_DEPLOY_LOG_LOCATION:logs/geoserver/geoserver.log}
     java-home: ${GEOSERVER_DEPLOY_JAVA_HOME:}
@@ -58,6 +59,9 @@ geoserver:
     - name: price_style
       # 价格样式，按 total_num 字段渲染。
       sld-location: classpath:styles/price-style.sld
+    - name: score_style
+      # 评分样式，按 total_num 字段渲染。
+      sld-location: classpath:styles/score-style.sld
 
   # 步骤 3：创建缺失的 GeoServer datastore。GaussDB/openGauss 使用 postgis 兼容方式。
   datastore:
@@ -194,7 +198,7 @@ geoserver:
         name: geom_polygon
         type: Polygon
         srid: 4326
-      default-style: count_style
+      default-style: score_style
       sql-parameters:
         - name: type
           # type 在该图层中是列名参数，必须严格限制在分区结果表已有评分列内。

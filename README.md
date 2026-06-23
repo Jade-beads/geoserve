@@ -5,7 +5,7 @@
 ## 功能说明
 
 - 创建缺失的 `site_selection` 工作区。
-- 创建缺失的工作区样式：`count_style`、`price_style`。
+- 创建缺失的工作区样式：`count_style`、`price_style`、`score_style`。
 - 创建缺失的 GaussDB/openGauss PostGIS 兼容数据源：`gauss_store`。
 - 创建缺失的 SQL View 图层：`basic_all`、`basic`、`scene`、`finance_app`、`land_val`、`mode_result`。
 - 为图层设置默认样式。
@@ -173,22 +173,33 @@ src/main/resources/geoserver/geoserver-bin.zip
 
 开启托管部署后，应用启动顺序如下：
 
-1. 创建 `work-dir`、`install-dir`、`data-dir`、`cache-dir`、`log-dir`。
-2. 删除旧的 `install-dir`，重新解压 GeoServer ZIP。
-3. 设置 `GEOSERVER_DATA_DIR`、`GEOWEBCACHE_CACHE_DIR`、`GEOSERVER_LOG_LOCATION`、`JAVA_HOME`、`JAVA_OPTS`。
-4. 执行 GeoServer `bin/startup.sh`。
-5. 轮询 `GET /rest/about/version`，等待 GeoServer 可用。
-6. 如果 `GEOSERVER_INIT_RUN_ON_STARTUP=true`，再执行 workspace、style、datastore、layer、GWC 初始化。
+1. 创建 `work-dir`、`install-dir`、`data-dir`、实际 GWC 切片目录、`log-dir`。
+2. 如果当前 GeoServer 已在运行，先执行和停止项目一致的停止流程。
+3. 保留已有 `install-dir`，重新解压 GeoServer ZIP 时只补齐缺失文件，已存在文件不会覆盖。
+4. 设置 `GEOSERVER_DATA_DIR`、`GEOWEBCACHE_CACHE_DIR`、`GEOSERVER_LOG_LOCATION`、`JAVA_HOME`、`JAVA_OPTS`。
+5. 执行 GeoServer `bin/startup.sh`。
+6. 轮询 `GET /rest/about/version`，等待 GeoServer 可用。
+7. 如果 `GEOSERVER_INIT_RUN_ON_STARTUP=true`，再执行 workspace、style、datastore、layer、GWC 初始化。
 
-停止项目时，应用会优先执行 `bin/shutdown.sh`，再销毁子进程。默认只删除 `install-dir`，不会删除 `data-dir`、`cache-dir`、`log-dir`。
+停止项目时，应用会优先执行 `bin/shutdown.sh`，再销毁子进程。默认只停止 GeoServer，不删除 `install-dir`，也不会删除 `data-dir`、实际 GWC 切片目录、`log-dir`。如确实需要恢复旧行为，可以显式设置 `GEOSERVER_DEPLOY_DELETE_INSTALL_ON_STOP=true`。
 
-切片目录需要在项目启动前配置 `GEOSERVER_DEPLOY_CACHE_DIR`，或在配置文件中设置 `geoserver.deploy.cache-dir`。代码会在 GeoServer 启动脚本执行前注入到 `GEOWEBCACHE_CACHE_DIR`，因此 GeoServer 启动后会直接把 GWC 切片写到该目录。生产环境建议配置到 A/B 服务器共同可访问的挂载盘，例如：
+切片挂载盘根目录需要在项目启动前配置 `GEOSERVER_DEPLOY_CACHE_DIR`，或在配置文件中设置 `geoserver.deploy.cache-dir`。默认开启 `GEOSERVER_DEPLOY_CACHE_DIR_PER_HOST_ENABLED=true`，代码会按本机 IP 自动派生实际 GWC 切片目录，并在 GeoServer 启动脚本执行前注入到 `GEOWEBCACHE_CACHE_DIR` 和 `JAVA_OPTS -DGEOWEBCACHE_CACHE_DIR`。
+
+例如挂载盘根目录配置为：
 
 ```bash
-export GEOSERVER_DEPLOY_CACHE_DIR=/mnt/share/geowebcache/site-selection
+export GEOSERVER_DEPLOY_CACHE_DIR=/geoserver
 ```
 
-该目录不能放到 `GEOSERVER_DEPLOY_INSTALL_DIR` 里面，否则项目停止删除解压运行目录时会误删切片缓存，应用会直接启动失败并输出错误。
+例如某个节点按本机 IP 派生后的实际 GWC 切片目录为：
+
+```text
+/geoserver/192_168_0_1_gwc
+```
+
+本机 IP 由项目内 `IpUtil.getHostIp()` 获取；如果无法获取非 loopback IPv4，应用会启动失败并输出明确错误，避免 A/B 两台机器误用同一个共享根目录。需要关闭按 IP 分目录时，设置 `GEOSERVER_DEPLOY_CACHE_DIR_PER_HOST_ENABLED=false`。
+
+`data-dir`、实际 GWC 切片目录、`log-dir` 建议放在 `install-dir` 外。尤其当显式开启 `GEOSERVER_DEPLOY_DELETE_INSTALL_ON_STOP=true` 时，这些可复用目录不能放到 `GEOSERVER_DEPLOY_INSTALL_DIR` 下面。
 
 ### 关键配置
 
@@ -198,9 +209,11 @@ export GEOSERVER_DEPLOY_CACHE_DIR=/mnt/share/geowebcache/site-selection
 | `GEOSERVER_DEPLOY_NODE_NAME` | 当前节点名，用于日志区分 | `local` |
 | `GEOSERVER_DEPLOY_ARCHIVE_LOCATION` | GeoServer ZIP 包位置 | `classpath:geoserver/geoserver-bin.zip` |
 | `GEOSERVER_DEPLOY_WORK_DIR` | 托管部署根目录 | `runtime/geoserver` |
-| `GEOSERVER_DEPLOY_INSTALL_DIR` | GeoServer 解压运行目录，停止时可删除 | `runtime/geoserver/install` |
+| `GEOSERVER_DEPLOY_INSTALL_DIR` | GeoServer 解压运行目录，默认停止时保留 | `runtime/geoserver/install` |
+| `GEOSERVER_DEPLOY_DELETE_INSTALL_ON_STOP` | 停止项目时是否删除解压运行目录 | `false` |
 | `GEOSERVER_DEPLOY_DATA_DIR` | GeoServer 数据目录，建议 A/B 各自独立 | `runtime/geoserver/data` |
-| `GEOSERVER_DEPLOY_CACHE_DIR` | GWC 切片缓存目录，可配置共享盘 | `runtime/geoserver/gwc-cache` |
+| `GEOSERVER_DEPLOY_CACHE_DIR` | GWC 切片挂载盘根目录，默认会按本机 IP 派生子目录 | `runtime/geoserver/gwc-cache` |
+| `GEOSERVER_DEPLOY_CACHE_DIR_PER_HOST_ENABLED` | 是否按本机 IP 派生实际 GWC 目录 | `true` |
 | `GEOSERVER_DEPLOY_LOG_DIR` | GeoServer 日志目录 | `logs/geoserver` |
 | `GEOSERVER_DEPLOY_LOG_LOCATION` | GeoServer 自身日志文件 | `logs/geoserver/geoserver.log` |
 | `GEOSERVER_DEPLOY_JAVA_HOME` | 启动 GeoServer 使用的 JDK 路径 | 空，继承当前环境 |
@@ -212,7 +225,7 @@ export GEOSERVER_DEPLOY_CACHE_DIR=/mnt/share/geowebcache/site-selection
 
 `GEOSERVER_BASE_URL` 必须和托管 GeoServer 的真实端口、上下文路径一致。默认是 `http://localhost:8080/geoserver`；如果调整 `GEOSERVER_DEPLOY_PORT` 或 `GEOSERVER_DEPLOY_CONTEXT_PATH`，需要同步调整 `GEOSERVER_BASE_URL`。
 
-`data-dir`、`cache-dir`、`log-dir`、`log-location` 不能放在 `install-dir` 下面。因为 `install-dir` 会在停止时删除，这些目录如果配置在里面会导致可复用数据被误删，应用会直接启动失败并输出明确错误。
+`GEOSERVER_DEPLOY_CACHE_DIR` 是挂载盘根目录，不是最终写入切片的目录。开启按 IP 分目录后，最终目录固定为 `<cache-dir>/<本机IP下划线>_gwc`。
 
 ### A/B 节点示例
 
@@ -225,12 +238,13 @@ export GEOSERVER_DEPLOY_INSTALL_DIR=/opt/geoserve/runtime/a/install
 export GEOSERVER_DEPLOY_DATA_DIR=/opt/geoserve/runtime/a/data
 export GEOSERVER_DEPLOY_LOG_DIR=/opt/geoserve/logs/a
 export GEOSERVER_DEPLOY_LOG_LOCATION=/opt/geoserve/logs/a/geoserver.log
-export GEOSERVER_DEPLOY_CACHE_DIR=/mnt/share/geowebcache/site-selection
+export GEOSERVER_DEPLOY_CACHE_DIR=/geoserver
+export GEOSERVER_DEPLOY_CACHE_DIR_PER_HOST_ENABLED=true
 export GEOSERVER_BASE_URL=http://localhost:8080/geoserver
 export GEOSERVER_INIT_RUN_ON_STARTUP=true
 ```
 
-B 节点只需要把 `NODE_NAME`、`INSTALL_DIR`、`DATA_DIR`、`LOG_DIR` 改成 B 节点自己的目录，`GEOSERVER_DEPLOY_CACHE_DIR` 可以继续指向同一个共享盘目录。
+B 节点只需要把 `NODE_NAME`、`INSTALL_DIR`、`DATA_DIR`、`LOG_DIR` 改成 B 节点自己的目录，`GEOSERVER_DEPLOY_CACHE_DIR` 可以继续指向同一个挂载盘根目录。实际 GWC 目录会按本机 IP 区分，例如 A 节点是 `/geoserver/192_168_0_1_gwc`，B 节点是 `/geoserver/192_168_0_2_gwc`。
 
 ## 资源清单
 
@@ -240,6 +254,7 @@ B 节点只需要把 `NODE_NAME`、`INSTALL_DIR`、`DATA_DIR`、`LOG_DIR` 改成
 | --- | --- | --- |
 | `count_style` | `classpath:styles/count-style.sld` | 人口数量语义配色，按 `total_num` 渲染 |
 | `price_style` | `classpath:styles/price-style.sld` | 价格语义配色，按 `total_num` 渲染 |
+| `score_style` | `classpath:styles/score-style.sld` | 评分语义配色，按 `total_num` 渲染 |
 
 图层：
 
@@ -250,7 +265,7 @@ B 节点只需要把 `NODE_NAME`、`INSTALL_DIR`、`DATA_DIR`、`LOG_DIR` 改成
 | `scene` | WMS | `classpath:sql/scene.sql` | `tb_grid_personalized_portrait_total` | `batchId county ptype` | `count_style` |
 | `finance_app` | WMS | `classpath:sql/finance_app.sql` | `tb_grid_finance_app_total` | `batchId county ptype` | `count_style` |
 | `land_val` | WMS | `classpath:sql/land_val.sql` | `tb_grid_land_value_total` | `batchId county ptype` | `price_style` |
-| `mode_result` | WMS | `classpath:sql/mode_result.sql` | `tb_grid_score_result` | `batch_id type` | `count_style` |
+| `mode_result` | WMS | `classpath:sql/mode_result.sql` | `tb_grid_score_result` | `batch_id type` | `score_style` |
 
 所有 SQL View 模板统一返回：
 
