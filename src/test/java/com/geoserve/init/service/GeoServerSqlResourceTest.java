@@ -198,6 +198,7 @@ class GeoServerSqlResourceTest {
         assertThat(yaml).contains("admin-password-encoded: ${GEOSERVER_DEPLOY_ADMIN_PASSWORD_ENCODED:}");
         assertThat(yaml).contains("users-xml-path: ${GEOSERVER_DEPLOY_USERS_XML_PATH:security/usergroup/default/users.xml}");
         assertThat(yaml).contains("startup-timeout-seconds: ${GEOSERVER_DEPLOY_STARTUP_TIMEOUT_SECONDS:120}");
+        assertThat(yaml).contains("- WebMercatorQuad");
     }
 
     @Test
@@ -226,7 +227,8 @@ class GeoServerSqlResourceTest {
         assertThat(readme).contains("security/usergroup/default/users.xml");
         assertThat(readme).contains("启动前替换");
         assertThat(readme).contains("/geoserver/192_168_0_1_gwc");
-        assertThat(readme).contains("启动脚本执行前注入到 `GEOWEBCACHE_CACHE_DIR`");
+        assertThat(readme).contains("webapps/geoserver/WEB-INF/web.xml");
+        assertThat(readme).contains("启动前写入 `webapps/geoserver/WEB-INF/web.xml`");
         assertThat(readme).contains("需要在项目启动前配置");
         assertThat(readme).contains("按本机 IP 自动派生");
     }

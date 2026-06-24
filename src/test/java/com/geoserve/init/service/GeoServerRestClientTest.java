@@ -27,6 +27,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -50,19 +51,16 @@ class GeoServerRestClientTest {
 
     private GeoServerRestClient client;
     private MockRestServiceServer server;
+    private GeoServerStyleHttpClient styleHttpClient;
 
     @BeforeEach
     void setUp() {
         // 测试凭据使用虚构值，避免仓库历史中出现真实密钥。
         RestTemplate restTemplate = new RestTemplate();
-        GeoServerInitProperties properties = new GeoServerInitProperties();
-        properties.setBaseUrl("http://geoserver.local/geoserver");
-        properties.setUsername("test-user");
-        properties.setPassword("test-password");
-        properties.setWorkspace("site_selection");
-        properties.setDatastore(datastore());
+        GeoServerInitProperties properties = testProperties("http://geoserver.local/geoserver");
+        styleHttpClient = new GeoServerStyleHttpClient();
 
-        client = new GeoServerRestClient(restTemplate, properties, new DefaultResourceLoader());
+        client = new GeoServerRestClient(restTemplate, properties, new DefaultResourceLoader(), styleHttpClient);
         server = MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(false).build();
     }
 
@@ -104,20 +102,29 @@ class GeoServerRestClientTest {
         style.setName("count_style");
         style.setSldLocation("classpath:styles/count-style.sld");
 
+        final AtomicReference<String> uploadUrl = new AtomicReference<String>();
+        final AtomicReference<String> uploadUsername = new AtomicReference<String>();
+        final AtomicReference<String> uploadPassword = new AtomicReference<String>();
+        final AtomicReference<String> uploadBody = new AtomicReference<String>();
+        RestTemplate styleRestTemplate = new RestTemplate();
+        GeoServerInitProperties properties = testProperties("http://geoserver.local/geoserver");
+        styleHttpClient = new CapturingStyleHttpClient(uploadUrl, uploadUsername, uploadPassword, uploadBody);
+        client = new GeoServerRestClient(styleRestTemplate, properties, new DefaultResourceLoader(), styleHttpClient);
+        server = MockRestServiceServer.bindTo(styleRestTemplate).ignoreExpectOrder(false).build();
+
         // 样式缺失时，客户端会读取 classpath SLD 并上传到根工作区。
         server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces/site_selection/styles/count_style.json"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withStatus(HttpStatus.NOT_FOUND));
-        server.expect(once(), requestTo("http://geoserver.local/geoserver/rest/workspaces/site_selection/styles?name=count_style"))
-                .andExpect(method(HttpMethod.POST))
-                .andExpect(content().contentType("application/vnd.ogc.sld+xml"))
-                .andExpect(content().string(containsString("<sld:StyledLayerDescriptor")))
-                .andRespond(withStatus(HttpStatus.CREATED));
 
         ResourceAction action = client.ensureStyle(style);
 
         assertThat(action.getStatus()).isEqualTo(ResourceStatus.CREATED);
         assertThat(action.getName()).isEqualTo("site_selection:count_style");
+        assertThat(uploadUrl.get()).isEqualTo("http://geoserver.local/geoserver/rest/workspaces/site_selection/styles?name=count_style");
+        assertThat(uploadUsername.get()).isEqualTo("test-user");
+        assertThat(uploadPassword.get()).isEqualTo("test-password");
+        assertThat(uploadBody.get()).contains("<sld:StyledLayerDescriptor");
         server.verify();
     }
 
@@ -247,7 +254,7 @@ class GeoServerRestClientTest {
     }
 
     @Test
-    void ensureGwcLayerCreatesEpsg3857PngRegexBatchIdFilterWhenBasicAllIsMissing() {
+    void ensureGwcLayerCreatesWebMercatorQuadPngRegexBatchIdFilterWhenBasicAllIsMissing() {
         Layer layer = sqlViewLayer("basic_all", true);
         layer.setSqlLocation("classpath:sql/basic_all.sql");
 
@@ -259,7 +266,7 @@ class GeoServerRestClientTest {
                 .andExpect(method(HttpMethod.PUT))
                 .andExpect(content().contentType(MediaType.APPLICATION_XML))
                 .andExpect(content().string(containsString("<name>site_selection:basic_all</name>")))
-                .andExpect(content().string(containsString("<gridSetName>EPSG:3857</gridSetName>")))
+                .andExpect(content().string(containsString("<gridSetName>WebMercatorQuad</gridSetName>")))
                 .andExpect(content().string(containsString("<string>image/png</string>")))
                 .andExpect(content().string(containsString("<regexParameterFilter>")))
                 .andExpect(content().string(containsString("<key>VIEWPARAMS</key>")))
@@ -299,6 +306,16 @@ class GeoServerRestClientTest {
         datastore.setPassword("test-db-password");
         datastore.setDbtype("postgis");
         return datastore;
+    }
+
+    private GeoServerInitProperties testProperties(String baseUrl) {
+        GeoServerInitProperties properties = new GeoServerInitProperties();
+        properties.setBaseUrl(baseUrl);
+        properties.setUsername("test-user");
+        properties.setPassword("test-password");
+        properties.setWorkspace("site_selection");
+        properties.setDatastore(datastore());
+        return properties;
     }
 
     private Layer sqlViewLayer(String name, boolean wmtsEnabled) {
@@ -371,7 +388,7 @@ class GeoServerRestClientTest {
 
         Wmts wmts = new Wmts();
         wmts.setEnabled(enabled);
-        wmts.setGridsets(Collections.singletonList("EPSG:3857"));
+        wmts.setGridsets(Collections.singletonList("WebMercatorQuad"));
         wmts.setFormats(Collections.singletonList("image/png"));
         wmts.setParameterFilters(Collections.singletonList(viewparams));
         return wmts;
@@ -380,6 +397,31 @@ class GeoServerRestClientTest {
     private String basicAuth() {
         return "Basic " + java.util.Base64.getEncoder()
                 .encodeToString("test-user:test-password".getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static class CapturingStyleHttpClient extends GeoServerStyleHttpClient {
+        private final AtomicReference<String> uploadUrl;
+        private final AtomicReference<String> uploadUsername;
+        private final AtomicReference<String> uploadPassword;
+        private final AtomicReference<String> uploadBody;
+
+        CapturingStyleHttpClient(AtomicReference<String> uploadUrl,
+                                 AtomicReference<String> uploadUsername,
+                                 AtomicReference<String> uploadPassword,
+                                 AtomicReference<String> uploadBody) {
+            this.uploadUrl = uploadUrl;
+            this.uploadUsername = uploadUsername;
+            this.uploadPassword = uploadPassword;
+            this.uploadBody = uploadBody;
+        }
+
+        @Override
+        public void postSld(String targetUrl, String username, String password, String sld) {
+            uploadUrl.set(targetUrl);
+            uploadUsername.set(username);
+            uploadPassword.set(password);
+            uploadBody.set(sld);
+        }
     }
 
     @SafeVarargs

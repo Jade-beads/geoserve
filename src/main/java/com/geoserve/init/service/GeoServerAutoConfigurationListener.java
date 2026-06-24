@@ -231,6 +231,7 @@ public class GeoServerAutoConfigurationListener implements ApplicationListener<A
         File home = resolveHomeFromScript(startupScript, deploy.getStartupScript());
         prepareUsersXml(deploy, home, dataDir);
         replaceJdbcDriver(deploy, home);
+        configureGwcCacheDirectory(deploy, home, cacheDir);
         File stopScript = new File(home, normalizeRelativePath(deploy.getShutdownScript()));
         Map<String, String> environment = environment(deploy, home, dataDir, cacheDir, logLocation);
 
@@ -454,6 +455,72 @@ public class GeoServerAutoConfigurationListener implements ApplicationListener<A
                         nodeName(deploy), file.getAbsolutePath());
             }
         }
+    }
+
+    private void configureGwcCacheDirectory(Deploy deploy, File home, File cacheDir) throws IOException {
+        File webXml = safeHomeChild(home, "webapps/geoserver/WEB-INF/web.xml", "GeoServer web.xml");
+        if (!webXml.isFile()) {
+            throw new IllegalStateException("GeoServer web.xml not found: " + webXml.getAbsolutePath());
+        }
+        try {
+            Document document = secureDocumentBuilderFactory().newDocumentBuilder().parse(webXml);
+            Element contextParam = findContextParam(document, "GEOWEBCACHE_CACHE_DIR");
+            if (contextParam == null) {
+                contextParam = document.createElement("context-param");
+                Element paramName = document.createElement("param-name");
+                paramName.setTextContent("GEOWEBCACHE_CACHE_DIR");
+                contextParam.appendChild(paramName);
+                contextParam.appendChild(document.createElement("param-value"));
+                document.getDocumentElement().appendChild(contextParam);
+            }
+            Element paramValue = firstChildElement(contextParam, "param-value");
+            if (paramValue == null) {
+                paramValue = document.createElement("param-value");
+                contextParam.appendChild(paramValue);
+            }
+            paramValue.setTextContent(cacheDir.getAbsolutePath());
+            writeXml(document, webXml);
+            log.info("GeoServer GWC cache directory configured node={} webXml={} cacheDir={}",
+                    nodeName(deploy), webXml.getAbsolutePath(), cacheDir.getAbsolutePath());
+        } catch (IllegalStateException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new IllegalStateException("GeoServer web.xml GWC cache directory update failed: "
+                    + webXml.getAbsolutePath() + " message=" + ex.getMessage(), ex);
+        }
+    }
+
+    private Element findContextParam(Document document, String name) {
+        NodeList contextParams = document.getElementsByTagName("context-param");
+        for (int i = 0; i < contextParams.getLength(); i++) {
+            Node node = contextParams.item(i);
+            if (node instanceof Element) {
+                Element contextParam = (Element) node;
+                Element paramName = firstChildElement(contextParam, "param-name");
+                if (paramName != null && name.equals(paramName.getTextContent().trim())) {
+                    return contextParam;
+                }
+            }
+        }
+        return null;
+    }
+
+    private Element firstChildElement(Element parent, String tagName) {
+        NodeList children = parent.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node node = children.item(i);
+            if (node instanceof Element && tagName.equals(((Element) node).getTagName())) {
+                return (Element) node;
+            }
+        }
+        return null;
+    }
+
+    private void writeXml(Document document, File target) throws Exception {
+        TransformerFactory transformerFactory = TransformerFactory.newInstance();
+        Transformer transformer = transformerFactory.newTransformer();
+        transformer.setOutputProperty(OutputKeys.INDENT, "yes");
+        transformer.transform(new DOMSource(document), new StreamResult(target));
     }
 
     private File safeHomeChild(File home, String relativePath, String name) throws IOException {

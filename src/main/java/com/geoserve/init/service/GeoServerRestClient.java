@@ -52,13 +52,16 @@ public class GeoServerRestClient {
     private final RestTemplate restTemplate;
     private final GeoServerInitProperties properties;
     private final ResourceLoader resourceLoader;
+    private final GeoServerStyleHttpClient styleHttpClient;
 
     public GeoServerRestClient(RestTemplate restTemplate,
                                GeoServerInitProperties properties,
-                               ResourceLoader resourceLoader) {
+                               ResourceLoader resourceLoader,
+                               GeoServerStyleHttpClient styleHttpClient) {
         this.restTemplate = restTemplate;
         this.properties = properties;
         this.resourceLoader = resourceLoader;
+        this.styleHttpClient = styleHttpClient;
     }
 
     /**
@@ -113,10 +116,8 @@ public class GeoServerRestClient {
         }
 
         String sld = readResource(required(style.getSldLocation(), "style.sldLocation"));
-        HttpHeaders headers = authHeaders();
-        headers.setContentType(MediaType.parseMediaType("application/vnd.ogc.sld+xml"));
-        restTemplate.exchange(url("/rest/workspaces/" + workspace + "/styles?name=" + name),
-                HttpMethod.POST, new HttpEntity<String>(sld, headers), Void.class);
+        styleHttpClient.postSld(url("/rest/workspaces/" + workspace + "/styles?name=" + name),
+                properties.getUsername(), properties.getPassword(), sld);
         return ResourceAction.created("style", qualifiedName, "Style created");
     }
 
@@ -580,10 +581,14 @@ public class GeoServerRestClient {
      */
     private HttpHeaders authHeaders() {
         HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.AUTHORIZATION, basicAuthHeader());
+        return headers;
+    }
+
+    private String basicAuthHeader() {
         String userPass = defaultString(properties.getUsername(), "") + ":" + defaultString(properties.getPassword(), "");
         String encoded = Base64.getEncoder().encodeToString(userPass.getBytes(StandardCharsets.UTF_8));
-        headers.set(HttpHeaders.AUTHORIZATION, "Basic " + encoded);
-        return headers;
+        return "Basic " + encoded;
     }
 
     /**

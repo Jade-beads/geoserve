@@ -33,6 +33,22 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
+        <!-- GeoServer SLD 上传使用原生 Apache HttpClient，避开业务侧 JSON-only RestTemplate 封装。 -->
+        <dependency>
+            <groupId>org.apache.httpcomponents</groupId>
+            <artifactId>httpclient</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>commons-codec</groupId>
+                    <artifactId>commons-codec</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>commons-codec</groupId>
+            <artifactId>commons-codec</artifactId>
+            <version>1.11</version>
+        </dependency>
         <!-- 为 geoserver.* 配置生成元数据，不引入额外运行时代码。 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

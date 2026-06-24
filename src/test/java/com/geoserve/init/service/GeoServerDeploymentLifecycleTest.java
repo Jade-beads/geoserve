@@ -142,6 +142,9 @@ class GeoServerDeploymentLifecycleTest {
                 .contains("-Djetty.http.port=18080")
                 .contains("-Xmx512m")
                 .doesNotContain("-Xmx4g");
+        assertThat(new String(Files.readAllBytes(home.resolve("webapps/geoserver/WEB-INF/web.xml")), StandardCharsets.UTF_8))
+                .contains("<param-name>GEOWEBCACHE_CACHE_DIR</param-name>")
+                .contains("<param-value>" + tempDir.resolve("cache/192_168_0_1_gwc") + "</param-value>");
         verify(initService).initialize();
 
         listener.onApplicationEvent(new ContextClosedEvent(mock(org.springframework.context.ApplicationContext.class)));
@@ -426,6 +429,8 @@ class GeoServerDeploymentLifecycleTest {
             addZipEntry(zip, "geoserver-2.28.1/webapps/geoserver/WEB-INF/lib/postgresql-42.7.3.jar",
                     "postgres-driver");
             addZipEntry(zip, "geoserver-2.28.1/webapps/geoserver/WEB-INF/lib/keep.jar", "keep");
+            addZipEntry(zip, "geoserver-2.28.1/webapps/geoserver/WEB-INF/web.xml",
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?><web-app><display-name>GeoServer</display-name></web-app>");
             addZipEntry(zip, "geoserver-2.28.1/data_dir/security/usergroup/default/users.xml", usersXml);
             addZipEntry(zip, "geoserver-2.28.1/data_dir/security/role/default/roles.xml", "<roles/>");
         } finally {

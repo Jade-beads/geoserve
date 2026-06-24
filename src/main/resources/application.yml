@@ -105,7 +105,7 @@ geoserver:
         # basic_all 是唯一需要发布 WMTS 的参数化瓦片图层。
         enabled: true
         gridsets:
-          - EPSG:3857
+          - WebMercatorQuad
         formats:
           - image/png
         parameter-filters:

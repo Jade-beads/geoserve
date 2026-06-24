@@ -164,7 +164,7 @@ class GeoServerInitServiceTest {
         layer.setBatchIdDefault("1001");
         Wmts wmts = new Wmts();
         wmts.setEnabled(wmtsEnabled);
-        wmts.setGridsets(Collections.singletonList("EPSG:3857"));
+        wmts.setGridsets(Collections.singletonList("WebMercatorQuad"));
         wmts.setFormats(Collections.singletonList("image/png"));
         layer.setWmts(wmts);
         return layer;
